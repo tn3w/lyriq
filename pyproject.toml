@@ -1,6 +1,6 @@
 [project]
 name = "lyriq"
-version = "1.0.4"
+version = "1.0.5"
 description = "A lightweight Python library designed to effortlessly fetch song lyrics."
 readme = "README.md"
 authors = [

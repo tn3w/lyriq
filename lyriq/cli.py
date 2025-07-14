@@ -321,7 +321,7 @@ def main() -> int:
         "artist_name", nargs="?", default=None, help="Name of the artist"
     )
     parser.add_argument(
-        "album-name", nargs="?", default=None, help="Name of the album (optional)"
+        "album_name", nargs="?", default=None, help="Name of the album (optional)"
     )
     parser.add_argument(
         "--duration",
