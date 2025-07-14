@@ -4,9 +4,6 @@
 name: Upload Python Package
 
 on:
-    push:
-        branches:
-            - master
     workflow_run:
         workflows: ['Python Tests']
         branches: [master]
@@ -18,14 +15,14 @@ permissions:
 
 jobs:
     deploy:
-        if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' }}
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
         runs-on: ubuntu-latest
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
             - name: Set up Python
-              uses: actions/setup-python@v4
+              uses: actions/setup-python@v5
               with:
                   python-version: '3.x'
             - name: Install dependencies
