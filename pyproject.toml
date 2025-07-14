@@ -7,7 +7,7 @@ authors = [
     {name = "TN3W", email = "tn3w@protonmail.com"}
 ]
 license = "Apache-2.0"
-license-files = { paths = ["LICENSE"] }
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
