@@ -657,7 +657,7 @@ class TestSearchLyrics:
         with pytest.raises(ValueError) as excinfo:
             search_lyrics()  # No parameters provided
 
-        assert "Either q, song_name, or album_name must be provided" in str(
+        assert "Either q or song_name must be provided" in str(
             excinfo.value
         )
 
