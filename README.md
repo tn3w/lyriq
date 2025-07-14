@@ -337,8 +337,14 @@ if lyrics:
 
 ```
 lyriq/
+├── .github/
+│   ├── workflows/
+│   │   ├── python-tests.yml
+│   │   └── python-publish.yml
+├── environment.yml      # Environment file
 ├── lyriq/
 │   ├── __init__.py      # Package exports
+│   ├── __main__.py      # CLI entry point
 │   ├── lyriq.py         # Core functionality
 │   ├── cli.py           # Command line interface
 │   └── cache.json       # Auto-generated cache file
@@ -348,7 +354,9 @@ lyriq/
 ├── pyproject.toml       # Project configuration
 ├── setup.py             # Setup script
 ├── main.py              # Example usage
-└── README.md            # This file
+├── README.md            # This file
+├── LICENSE              # License file
+└── .gitignore           # Git ignore file
 ```
 
 ### Running Tests
