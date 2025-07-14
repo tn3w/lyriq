@@ -358,6 +358,18 @@ def main() -> int:
         lyrics = get_lyrics_by_id(args.id, args.none_char)
     elif args.load:
         lyrics = Lyrics.from_json_file(args.load, args.none_char)
+    elif not args.song_name and not args.artist_name:
+        print(f"{Colors.RED}Error: Song name and artist name are required.{Colors.RESET}")
+        parser.print_help()
+        return 1
+    elif not args.song_name:
+        print(f"{Colors.RED}Error: Song name is required.{Colors.RESET}")
+        parser.print_help()
+        return 1
+    elif not args.artist_name:
+        print(f"{Colors.RED}Error: Artist name is required.{Colors.RESET}")
+        parser.print_help()
+        return 1
     else:
         lyrics = get_lyrics(
             args.song_name,
