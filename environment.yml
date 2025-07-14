@@ -1,0 +1,9 @@
+name: lyriq-env
+channels:
+    - defaults
+    - conda-forge
+dependencies:
+    - python>=3.6
+    - pip
+    - pip:
+          - -e ".[dev]"
