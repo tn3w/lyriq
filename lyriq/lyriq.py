@@ -12,7 +12,7 @@ import threading
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 from urllib.error import HTTPError
 
 from . import __version__
@@ -21,12 +21,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 API_URL = "https://lrclib.net/api"
-CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.json")
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+LYRICS_CACHE_PATH = os.path.join(CACHE_DIR, "lyrics.json")
+SEARCH_CACHE_PATH = os.path.join(CACHE_DIR, "search.json")
 
 
-class _LyricsCache:
+class _Cache:
     """
-    Internal class for caching lyrics data to avoid redundant API calls.
+    Internal class for caching data to avoid redundant API calls.
 
     The cache is stored in a JSON file and accessed with thread-safety.
     """
@@ -54,7 +57,7 @@ class _LyricsCache:
         else:
             self.cache = {}
 
-    def get(self, key: str) -> Optional[Dict]:
+    def get(self, key: str) -> Optional[Union[Dict, List[str]]]:
         """
         Get a value from the cache.
 
@@ -66,6 +69,59 @@ class _LyricsCache:
         """
         with self._lock:
             return self.cache.get(key)
+
+    def set(self, key: str, value: Union[Dict, List[str]]) -> None:
+        """
+        Set a value in the cache and write to disk asynchronously.
+
+        Args:
+            key: The cache key.
+            value: The value to store.
+        """
+        with self._lock:
+            self.cache[key] = value
+            cache_copy = self.cache.copy()
+
+        threading.Thread(
+            target=self._write_cache, args=(cache_copy,), daemon=False
+        ).start()
+
+    def update(self, data: Dict) -> None:
+        """
+        Add only new keys from data to the cache and write to disk asynchronously.
+        Existing keys in the cache will not be updated.
+        """
+        with self._lock:
+            for key, value in data.items():
+                if key not in self.cache:
+                    self.cache[key] = value
+            cache_copy = self.cache.copy()
+
+        threading.Thread(
+            target=self._write_cache, args=(cache_copy,), daemon=False
+        ).start()
+
+    def _write_cache(self, cache_data: Union[Dict, List[str]]) -> None:
+        """
+        Write the cache to disk.
+
+        Args:
+            cache_data: The cache data to write.
+        """
+        try:
+            with open(self.cache_file_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f)
+            logger.debug("Cache written to %s", self.cache_file_path)
+        except Exception as e:
+            logger.error("Error writing cache: %s", e)
+
+
+class _LyricsCache(_Cache):
+    """
+    Internal class for caching lyrics data to avoid redundant API calls.
+
+    The cache is stored in a JSON file and accessed with thread-safety.
+    """
 
     def get_by_lyrics_id(self, lyrics_id: str) -> Optional[Dict]:
         """
@@ -83,38 +139,20 @@ class _LyricsCache:
                     return value
             return None
 
-    def set(self, key: str, value: Dict) -> None:
+    def get_bulk_by_lyrics_id(self, lyrics_ids: List[str]) -> List[Dict]:
         """
-        Set a value in the cache and write to disk asynchronously.
-
-        Args:
-            key: The cache key.
-            value: The value to store.
+        Get a list of values from the cache by the id field.
         """
         with self._lock:
-            self.cache[key] = value
-            cache_copy = self.cache.copy()
-
-        threading.Thread(
-            target=self._write_cache, args=(cache_copy,), daemon=False
-        ).start()
-
-    def _write_cache(self, cache_data: Dict) -> None:
-        """
-        Write the cache to disk.
-
-        Args:
-            cache_data: The cache data to write.
-        """
-        try:
-            with open(self.cache_file_path, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f)
-            logger.debug("Cache written to %s", self.cache_file_path)
-        except Exception as e:
-            logger.error("Error writing cache: %s", e)
+            lyrics = []
+            for value in self.cache.values():
+                if value.get("id") in lyrics_ids:
+                    lyrics.append(value)
+            return lyrics
 
 
-cache = _LyricsCache(CACHE_FILE_PATH)
+lyrics_cache = _LyricsCache(LYRICS_CACHE_PATH)
+search_cache = _Cache(SEARCH_CACHE_PATH)
 
 
 def _process_lyrics(data: Dict, none_char: str = "♪") -> Dict[str, str]:
@@ -435,7 +473,7 @@ def get_lyrics_by_id(lyrics_id: str, none_char: str = "♪") -> Optional[Lyrics]
     Raises:
         Exception: If there is an error fetching the lyrics.
     """
-    cached_data = cache.get_by_lyrics_id(lyrics_id)
+    cached_data = lyrics_cache.get_by_lyrics_id(lyrics_id)
     if cached_data:
         return Lyrics.from_dict(cached_data, none_char=none_char)
 
@@ -444,7 +482,7 @@ def get_lyrics_by_id(lyrics_id: str, none_char: str = "♪") -> Optional[Lyrics]
         data = _json_get(url)
 
         cache_key = f"{data['artistName'].lower()}:{data['trackName'].lower()}"
-        cache.set(cache_key, data)
+        lyrics_cache.set(cache_key, data)
         return Lyrics.from_dict(data, none_char=none_char)
     except LyriqError as e:
         logger.error("Error getting lyrics for %s: %s", lyrics_id, e)
@@ -480,8 +518,8 @@ def get_lyrics(
         Exception: If there is an error fetching the lyrics.
     """
     cache_key = f"{_normalize_name(artist_name)}:{_normalize_name(song_name)}"
-    cached_data = cache.get(cache_key)
-    if cached_data:
+    cached_data = lyrics_cache.get(cache_key)
+    if cached_data and isinstance(cached_data, dict):
         return Lyrics.from_dict(cached_data, none_char=none_char)
 
     params = {
@@ -498,7 +536,7 @@ def get_lyrics(
     try:
         data = _json_get(url)
 
-        cache.set(cache_key, data)
+        lyrics_cache.set(cache_key, data)
         return Lyrics.from_dict(data, none_char=none_char)
     except LyriqError as e:
         logger.error("Error getting lyrics for %s by %s: %s", song_name, artist_name, e)
@@ -506,3 +544,74 @@ def get_lyrics(
     except Exception as e:
         logger.error("Error getting lyrics for %s by %s: %s", song_name, artist_name, e)
         raise e
+
+
+def search_lyrics(
+    q: Optional[str] = None,
+    song_name: Optional[str] = None,
+    artist_name: Optional[str] = None,
+    album_name: Optional[str] = None,
+    none_char: str = "♪",
+) -> Optional[List[Lyrics]]:
+    """
+    Search for lyrics by query.
+
+    Args:
+        q: The query to search for.
+        song_name: Optional song name for better matching.
+        artist_name: Optional artist name for better matching.
+        album_name: Optional album name for better matching.
+        none_char: Character to use for empty lines.
+
+    Returns:
+        A list of Lyrics objects if found, None otherwise.
+    """
+    params = {}
+    if q:
+        cache_key = f"{_normalize_name(q)}"
+        params["q"] = _normalize_name(q)
+    elif song_name and artist_name:
+        cache_key = f"{_normalize_name(artist_name)}:{_normalize_name(song_name)}"
+        params["track_name"] = _normalize_name(song_name)
+        params["artist_name"] = _normalize_name(artist_name)
+        if album_name:
+            params["album_name"] = _normalize_name(album_name)
+    else:
+        raise ValueError("Either q, song_name, or album_name must be provided")
+
+    cached_data = search_cache.get(cache_key)
+    if cached_data and isinstance(cached_data, list):
+        return [
+            Lyrics.from_dict(lyrics, none_char=none_char)
+            for lyrics in lyrics_cache.get_bulk_by_lyrics_id(cached_data)
+        ]
+
+    url = f"{API_URL}/search?{urllib.parse.urlencode(params)}"
+
+    try:
+        data = _json_get(url)
+        cache_data = {}
+
+        for lyrics in data:
+            lyrics_cache_key = (
+                f"{_normalize_name(lyrics['artistName'])}:"
+                f"{_normalize_name(lyrics['trackName'])}"
+            )
+            if lyrics_cache_key not in cache_data:
+                cache_data[lyrics_cache_key] = lyrics
+                lyrics_cache.set(lyrics_cache_key, lyrics)
+
+        lyrics_cache.update(cache_data)
+
+        search_cache.set(
+            cache_key,
+            [lyrics.get("id") for lyrics in cache_data.values() if lyrics.get("id")],
+        )
+
+        return [
+            Lyrics.from_dict(lyrics, none_char=none_char)
+            for lyrics in cache_data.values()
+        ]
+    except LyriqError as e:
+        logger.error("Error searching for lyrics: %s", e)
+        return None

@@ -9,9 +9,9 @@ import os
 import sys
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from . import Lyrics, __version__, get_lyrics, get_lyrics_by_id
+from . import Lyrics, __version__, get_lyrics, get_lyrics_by_id, search_lyrics
 
 try:
     import tty
@@ -260,11 +260,12 @@ def play_synced_lyrics(
                 if not no_info:
                     display_track_info(lyrics)
                 print(
-                    f"{Colors.YELLOW}Press '{'Space' if control_char == ' ' else control_char}'"
-                    f" to start/pause playback, 'q' to quit, 'r' to toggle repeat{Colors.RESET}"
+                    f"Press {Colors.YELLOW}'{'Space' if control_char == ' ' else control_char}'"
+                    f"{Colors.RESET} to start/pause playback, {Colors.YELLOW}'r'{Colors.RESET}"
+                    f" to toggle repeat, {Colors.YELLOW}'q'{Colors.RESET} to quit."
                 )
                 print(
-                    f"{Colors.YELLOW}Use arrow keys ← → to rewind/fast-forward 1s{Colors.RESET}\n"
+                    f"Use {Colors.YELLOW}arrow keys ← →{Colors.RESET} to rewind/fast-forward 1s\n"
                 )
                 if current_time > lyrics.duration:
                     playing = repeat
@@ -300,6 +301,95 @@ def display_plain_lyrics(lyrics: Dict[str, str]) -> None:
         print(f"{text}")
 
 
+def display_search_results(
+    results: List[Lyrics], search_query: str
+) -> Optional[Lyrics]:
+    """
+    Display search results in an interactive UI with arrow key navigation.
+
+    Args:
+        results: List of Lyrics objects from search
+        search_query: The original search query
+
+    Returns:
+        Selected Lyrics object or None if canceled
+    """
+    if not results or len(results) == 0:
+        print(f"{Colors.RED}No results found for '{search_query}'.{Colors.RESET}")
+        return None
+
+    selected_idx = 0
+    start_idx = 0
+    page_size = 4
+    max_idx = len(results) - 1
+
+    while True:
+        clear_screen()
+        print(f"{Colors.BOLD}Search results for '{search_query}':{Colors.RESET}")
+        print(
+            f"Found {len(results)} results. Use {Colors.YELLOW}↑/↓{Colors.RESET}"
+            f" arrows to navigate, {Colors.YELLOW}'Enter'{Colors.RESET} to select, "
+            f"or {Colors.YELLOW}'1-9'{Colors.RESET} to choose directly."
+        )
+        print(f"Press {Colors.YELLOW}'q'{Colors.RESET} to quit.\n")
+
+        if selected_idx >= start_idx + page_size:
+            start_idx = min(selected_idx - page_size + 1, max_idx - page_size + 1)
+        elif selected_idx < start_idx:
+            start_idx = max(0, selected_idx)
+
+        if start_idx > 0:
+            print(f"{Colors.BRIGHT_BLACK}   ↑ more results above ↑{Colors.RESET}")
+
+        end_idx = min(start_idx + page_size, len(results))
+
+        for i in range(start_idx, end_idx):
+            result = results[i]
+
+            album_info = f" - {result.album_name}" if result.album_name else ""
+            duration = f"{int(result.duration // 60)}:{int(result.duration % 60):02d}"
+            has_synced = bool(result.synced_lyrics and result.synced_lyrics.strip())
+            sync_indicator = (
+                f"{Colors.GREEN}[synced]{Colors.RESET}"
+                if has_synced
+                else f"{Colors.YELLOW}[plain]{Colors.RESET}"
+            )
+
+            if i == selected_idx:
+                selector = (
+                    f"{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}[{i+1}]{Colors.RESET} "
+                )
+            else:
+                selector = f"{Colors.BRIGHT_CYAN}[{i+1}]{Colors.RESET} "
+
+            print(
+                f"{selector}{result.track_name} - {result.artist_name}{album_info} "
+                f"({duration}) {sync_indicator}"
+            )
+
+        if end_idx < len(results):
+            print(f"{Colors.BRIGHT_BLACK}   ↓ more results below ↓{Colors.RESET}")
+
+        key = get_keypress()
+
+        if key == "q":
+            return None
+        if key in ("\r", "\n"):
+            return results[selected_idx]
+        if key in "123456789":
+            idx = int(key) - 1
+            if 0 <= idx < len(results):
+                return results[idx]
+        if key == "\x1b":
+            next_char = get_keypress()
+            if next_char == "[":
+                arrow = get_keypress()
+                if arrow == "A":
+                    selected_idx = max(0, selected_idx - 1)
+                elif arrow == "B":
+                    selected_idx = min(max_idx, selected_idx + 1)
+
+
 def main() -> int:
     """
     Main function for the CLI tool.
@@ -316,9 +406,17 @@ def main() -> int:
         help="show version message and exit",
     )
     parser.add_argument("--id", type=int, default=None, help="ID of the song")
-    parser.add_argument("song_name", nargs="?", default=None, help="Name of the song")
     parser.add_argument(
-        "artist_name", nargs="?", default=None, help="Name of the artist"
+        "song_name",
+        nargs="?",
+        default=None,
+        help="Name of the song (optional)",
+    )
+    parser.add_argument(
+        "artist_name",
+        nargs="?",
+        default=None,
+        help="Name of the artist (optional)",
     )
     parser.add_argument(
         "album_name", nargs="?", default=None, help="Name of the album (optional)"
@@ -329,6 +427,19 @@ def main() -> int:
         nargs="?",
         default=None,
         help="Duration of the song (optional)",
+    )
+    parser.add_argument(
+        "--search",
+        nargs="?",
+        const=True,
+        default=False,
+        help="Search for lyrics by song name and artist name. Optionally provide a search query.",
+    )
+    parser.add_argument(
+        "--search-index",
+        type=int,
+        default=None,
+        help="Select search result at specified index directly (1-based)",
     )
     parser.add_argument(
         "--none-char", default="♪", help="Character to use for empty lines"
@@ -354,7 +465,48 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.id:
+    if args.search is not False:
+        search_query = None
+        search_results = None
+
+        if isinstance(args.search, str):
+            search_query = args.search
+            search_results = search_lyrics(q=search_query, none_char=args.none_char)
+        elif args.song_name and args.artist_name:
+            search_query = f"{args.song_name} {args.artist_name}"
+            search_results = search_lyrics(
+                song_name=args.song_name,
+                artist_name=args.artist_name,
+                album_name=args.album_name,
+                none_char=args.none_char,
+            )
+        else:
+            print(
+                f"{Colors.RED}Error: Search requires either a query"
+                f"or song and artist names.{Colors.RESET}"
+            )
+            parser.print_help()
+            return 1
+
+        if not search_results:
+            print(f"{Colors.RED}No results found for '{search_query}'.{Colors.RESET}")
+            return 1
+
+        if args.search_index is not None:
+            if 1 <= args.search_index <= len(search_results):
+                lyrics = search_results[args.search_index - 1]
+            else:
+                print(
+                    f"{Colors.RED}Error: Search index {args.search_index}"
+                    f"out of range (1-{len(search_results)}).{Colors.RESET}"
+                )
+                return 1
+        else:
+            lyrics = display_search_results(search_results, search_query)
+            if not lyrics:
+                return 1
+
+    elif args.id:
         lyrics = get_lyrics_by_id(args.id, args.none_char)
     elif args.load:
         lyrics = Lyrics.from_json_file(args.load, args.none_char)

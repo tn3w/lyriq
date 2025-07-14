@@ -24,6 +24,7 @@ from lyriq.lyriq import (
     _normalize_name,
     _process_lyrics,
     get_lyrics_by_id,
+    search_lyrics,
     to_plain_lyrics,
 )
 
@@ -345,7 +346,7 @@ class TestGetLyrics:
     def test_get_lyrics_success(self):
         """Test successful lyrics retrieval."""
         with (
-            mock.patch("lyriq.lyriq.cache") as mock_cache,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache,
             mock.patch("lyriq.lyriq._json_get") as mock_json_get,
         ):
 
@@ -380,7 +381,7 @@ class TestGetLyrics:
         """Test lyrics retrieval with album name."""
         mock_json_get.return_value = sample_lyrics_data
 
-        with mock.patch("lyriq.lyriq.cache") as mock_cache:
+        with mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache:
             mock_cache.get.return_value = None
             get_lyrics("Test Track", "Test Artist", album_name="Test Album")
 
@@ -393,7 +394,7 @@ class TestGetLyrics:
         """Test handling of API failure."""
         mock_json_get.side_effect = Exception("API error")
 
-        with mock.patch("lyriq.lyriq.cache") as mock_cache:
+        with mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache:
             mock_cache.get.return_value = None
             with pytest.raises(Exception) as excinfo:
                 get_lyrics("Test Track", "Test Artist")
@@ -406,7 +407,7 @@ class TestGetLyricsById:
 
     def test_get_lyrics_by_id_from_cache(self):
         """Test retrieving lyrics by ID from cache."""
-        with mock.patch("lyriq.lyriq.cache") as mock_cache:
+        with mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache:
             sample_data = {
                 "syncedLyrics": "[00:00.00]Test",
                 "plainLyrics": "Test",
@@ -431,7 +432,7 @@ class TestGetLyricsById:
     def test_get_lyrics_by_id_from_api(self):
         """Test retrieving lyrics by ID from API."""
         with (
-            mock.patch("lyriq.lyriq.cache") as mock_cache,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache,
             mock.patch("lyriq.lyriq._json_get") as mock_json_get,
         ):
             sample_data = {
@@ -461,7 +462,7 @@ class TestGetLyricsById:
     def test_get_lyrics_by_id_failure(self):
         """Test handling of API failure when retrieving lyrics by ID."""
         with (
-            mock.patch("lyriq.lyriq.cache") as mock_cache,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_cache,
             mock.patch("lyriq.lyriq._json_get") as mock_json_get,
         ):
             mock_cache.get_by_lyrics_id.return_value = None
@@ -471,6 +472,208 @@ class TestGetLyricsById:
                 get_lyrics_by_id("test123")
 
             assert "API error" in str(excinfo.value)
+
+
+class TestSearchLyrics:
+    """Tests for the search_lyrics function."""
+
+    def test_search_lyrics_by_query(self):
+        """Test searching lyrics by general query."""
+        with (
+            mock.patch("lyriq.lyriq.search_cache") as mock_search_cache,
+            mock.patch("lyriq.lyriq._json_get") as mock_json_get,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_lyrics_cache,
+            mock.patch("builtins.open", mock.mock_open()),
+        ):
+            mock_search_cache.get.return_value = None
+            sample_results = [
+                {
+                    "id": "test123",
+                    "name": "Test Song",
+                    "trackName": "Test Track",
+                    "artistName": "Test Artist",
+                    "albumName": "Test Album",
+                    "syncedLyrics": "[00:00.00]Test Lyrics",
+                    "plainLyrics": "Test Lyrics",
+                    "duration": 180,
+                    "instrumental": False,
+                },
+                {
+                    "id": "test456",
+                    "name": "Another Song",
+                    "trackName": "Another Track",
+                    "artistName": "Another Artist",
+                    "albumName": "Another Album",
+                    "syncedLyrics": "[00:00.00]Another Test Lyrics",
+                    "plainLyrics": "Another Test Lyrics",
+                    "duration": 200,
+                    "instrumental": False,
+                },
+            ]
+            mock_json_get.return_value = sample_results
+            mock_lyrics_cache.get_bulk_by_lyrics_id.return_value = []
+
+            results = search_lyrics(q="test query")
+
+            assert results is not None
+            assert len(results) == 2
+            assert results[0].id == "test123"
+            assert results[0].track_name == "Test Track"
+            assert results[1].id == "test456"
+            assert results[1].track_name == "Another Track"
+
+            mock_json_get.assert_called_once()
+            called_url = mock_json_get.call_args[0][0]
+            assert f"{API_URL}/search" in called_url
+            assert "q=test+query" in called_url
+
+    def test_search_lyrics_by_song_artist(self):
+        """Test searching lyrics by song and artist name."""
+        with (
+            mock.patch("lyriq.lyriq.search_cache") as mock_search_cache,
+            mock.patch("lyriq.lyriq._json_get") as mock_json_get,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_lyrics_cache,
+            mock.patch("builtins.open", mock.mock_open()),
+        ):
+            mock_search_cache.get.return_value = None
+            sample_results = [
+                {
+                    "id": "test123",
+                    "name": "Test Song",
+                    "trackName": "Test Track",
+                    "artistName": "Test Artist",
+                    "albumName": "Test Album",
+                    "syncedLyrics": "[00:00.00]Test Lyrics",
+                    "plainLyrics": "Test Lyrics",
+                    "duration": 180,
+                    "instrumental": False,
+                }
+            ]
+            mock_json_get.return_value = sample_results
+            mock_lyrics_cache.get_bulk_by_lyrics_id.return_value = []
+
+            results = search_lyrics(song_name="Test Track", artist_name="Test Artist")
+
+            assert results is not None
+            assert len(results) == 1
+            assert results[0].id == "test123"
+            assert results[0].track_name == "Test Track"
+            assert results[0].artist_name == "Test Artist"
+
+            mock_json_get.assert_called_once()
+            called_url = mock_json_get.call_args[0][0]
+            assert f"{API_URL}/search" in called_url
+            assert "track_name=test+track" in called_url
+            assert "artist_name=test+artist" in called_url
+
+    def test_search_lyrics_from_cache(self):
+        """Test retrieving search results from cache."""
+        with (
+            mock.patch("lyriq.lyriq.search_cache") as mock_search_cache,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_lyrics_cache,
+            mock.patch("lyriq.lyriq._json_get") as mock_json_get,
+        ):
+            cached_ids = ["test123", "test456"]
+            mock_search_cache.get.return_value = cached_ids
+
+            cached_lyrics = [
+                {
+                    "id": "test123",
+                    "name": "Test Song",
+                    "trackName": "Test Track",
+                    "artistName": "Test Artist",
+                    "albumName": "Test Album",
+                    "syncedLyrics": "[00:00.00]Test Lyrics",
+                    "plainLyrics": "Test Lyrics",
+                    "duration": 180,
+                    "instrumental": False,
+                },
+                {
+                    "id": "test456",
+                    "name": "Another Song",
+                    "trackName": "Another Track",
+                    "artistName": "Another Artist",
+                    "albumName": "Another Album",
+                    "syncedLyrics": "[00:00.00]Another Lyrics",
+                    "plainLyrics": "Another Lyrics",
+                    "duration": 200,
+                    "instrumental": False,
+                },
+            ]
+            mock_lyrics_cache.get_bulk_by_lyrics_id.return_value = cached_lyrics
+
+            results = search_lyrics(q="test query")
+
+            assert results is not None
+            assert len(results) == 2
+            assert results[0].id == "test123"
+            assert results[1].id == "test456"
+
+            # Verify no API call was made
+            mock_json_get.assert_not_called()
+            mock_lyrics_cache.get_bulk_by_lyrics_id.assert_called_once_with(cached_ids)
+
+    def test_search_lyrics_with_album(self):
+        """Test searching lyrics with album name."""
+        with (
+            mock.patch("lyriq.lyriq.search_cache") as mock_search_cache,
+            mock.patch("lyriq.lyriq._json_get") as mock_json_get,
+            mock.patch("lyriq.lyriq.lyrics_cache") as mock_lyrics_cache,
+            mock.patch("builtins.open", mock.mock_open()),
+        ):
+            mock_search_cache.get.return_value = None
+            sample_results = [
+                {
+                    "id": "test123",
+                    "name": "Test Song",
+                    "trackName": "Test Track",
+                    "artistName": "Test Artist",
+                    "albumName": "Test Album",
+                    "syncedLyrics": "[00:00.00]Test Lyrics",
+                    "plainLyrics": "Test Lyrics",
+                    "duration": 180,
+                    "instrumental": False,
+                }
+            ]
+            mock_json_get.return_value = sample_results
+            mock_lyrics_cache.get_bulk_by_lyrics_id.return_value = []
+
+            results = search_lyrics(
+                song_name="Test Track",
+                artist_name="Test Artist",
+                album_name="Test Album",
+            )
+
+            assert results is not None
+            assert len(results) == 1
+            assert results[0].album_name == "Test Album"
+
+            mock_json_get.assert_called_once()
+            called_url = mock_json_get.call_args[0][0]
+            assert "album_name=test+album" in called_url
+
+    def test_search_lyrics_invalid_params(self):
+        """Test handling of invalid parameters."""
+        with pytest.raises(ValueError) as excinfo:
+            search_lyrics()  # No parameters provided
+
+        assert "Either q, song_name, or album_name must be provided" in str(
+            excinfo.value
+        )
+
+    def test_search_lyrics_api_error(self):
+        """Test handling of API error."""
+        with (
+            mock.patch("lyriq.lyriq.search_cache") as mock_search_cache,
+            mock.patch("lyriq.lyriq._json_get") as mock_json_get,
+        ):
+            mock_search_cache.get.return_value = None
+            mock_json_get.side_effect = LyriqError(404, "Not Found", "No results found")
+
+            results = search_lyrics(q="test query")
+
+            assert results is None
+            mock_json_get.assert_called_once()
 
 
 class TestToPlainLyrics:

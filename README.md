@@ -105,6 +105,38 @@ loaded_lyrics = lyrics.from_json_file("circles.json")
 ## Command Line Interface
 
 The library comes with a command-line interface for quick access to lyrics with synchronized lyrics playback:
+```
+usage: lyriq [-h] [-v] [--id ID] [--duration [DURATION]] [--search [SEARCH]] [--search-index SEARCH_INDEX]
+             [--none-char NONE_CHAR] [--no-info] [--plain] [--file FILE] [--file-format {plain,json}] [--load LOAD]
+             [song_name] [artist_name] [album_name]
+
+Fetch and display song lyrics
+
+positional arguments:
+  song_name             Name of the song (optional)
+  artist_name           Name of the artist (optional)
+  album_name            Name of the album (optional)
+
+options:
+  -h, --help            show this help message and exit
+  -v, --version         show version message and exit
+  --id ID               ID of the song
+  --duration [DURATION]
+                        Duration of the song (optional)
+  --search [SEARCH]     Search for lyrics by song name and artist name. Optionally provide a search query.
+  --search-index SEARCH_INDEX
+                        Select search result at specified index directly (1-based)
+  --none-char NONE_CHAR
+                        Character to use for empty lines
+  --no-info             Do not display track information
+  --plain               Display only plain lyrics
+  --file FILE           File to save lyrics to and exit
+  --file-format {plain,json}
+                        Format to save lyrics to
+  --load LOAD           Load lyrics from file
+```
+
+### Usage Examples
 
 ```bash
 # Basic usage
@@ -115,6 +147,9 @@ lyriq "Circles" "Post Malone" "Hollywood's Bleeding"
 
 # With duration (optional)
 lyriq "Circles" "Post Malone" --duration 210
+
+# Fetch lyrics by ID
+lyriq --id 449
 
 # Custom character for empty lines
 lyriq "Circles" "Post Malone" --none-char "*"
@@ -134,8 +169,14 @@ lyriq "Circles" "Post Malone" --file Circles-Post-Malone.json --file-format json
 # Load lyrics from file
 lyriq --load Circles-Post-Malone.json
 
-# Fetch lyrics by ID
-lyriq --id 449
+# Search for lyrics using song name and artist name fields with interactive UI
+lyriq "Circles" "Post Malone" --search
+
+# Search with general query
+lyriq --search "Circles Post Malone"
+
+# Search and select result at specific index
+lyriq --search "Circles Post Malone" --search-index 1
 ```
 
 ### CLI Features
@@ -147,6 +188,11 @@ lyriq --id 449
     - Press `←` / `→` arrows: Rewind/Fast-forward by 5 seconds
     - Press `r`: Toggle repeat
     - Press `q`: Quit
+- Interactive search UI:
+    - Navigate results with `↑` / `↓` arrow keys
+    - Select with `Enter` or number keys `1-9`
+    - Pagination with 4 results per page
+    - Shows synchronized lyrics availability with color indicators
 
 ## API Reference
 
@@ -172,6 +218,18 @@ Fetches lyrics for a song by its LRCLib ID.
     - `lyrics_id`: The LRCLib ID of the song
     - `none_char`: Character to use for empty lines in synchronized lyrics
 - **Returns**: A `Lyrics` object if found, `None` otherwise
+
+#### `search_lyrics(q=None, song_name=None, artist_name=None, album_name=None, none_char="♪")`
+
+Searches for lyrics by query or song/artist information.
+
+- **Parameters**:
+    - `q`: General search query string
+    - `song_name`: Optional song name for searching
+    - `artist_name`: Optional artist name for searching
+    - `album_name`: Optional album name for better matching
+    - `none_char`: Character to use for empty lines in synchronized lyrics
+- **Returns**: A list of `Lyrics` objects if found, `None` otherwise
 
 #### `to_plain_lyrics(lyrics, none_char="♪")`
 
@@ -331,6 +389,34 @@ if lyrics:
     print(f"Loaded: {loaded.track_name} by {loaded.artist_name}")
 ```
 
+### Searching for Lyrics
+
+```python
+from lyriq import search_lyrics
+
+# Search by general query
+search_results = search_lyrics(q="Circles Post Malone")
+
+# Search by song and artist name
+search_results = search_lyrics(song_name="Circles", artist_name="Post Malone")
+
+# Search with album name for better results
+search_results = search_lyrics(
+    song_name="Circles", 
+    artist_name="Post Malone", 
+    album_name="Hollywood's Bleeding"
+)
+
+# Process search results
+if search_results:
+    for idx, lyrics in enumerate(search_results):
+        print(f"{idx+1}. {lyrics.track_name} by {lyrics.artist_name}")
+        
+    # Use the first result
+    first_result = search_results[0]
+    print(f"Selected: {first_result.track_name} by {first_result.artist_name}")
+```
+
 ## Development
 
 ### Project Structure
@@ -347,7 +433,9 @@ lyriq/
 │   ├── __main__.py      # CLI entry point
 │   ├── lyriq.py         # Core functionality
 │   ├── cli.py           # Command line interface
-│   └── cache.json       # Auto-generated cache file
+│   └── cache/           # Auto-generated cache directory
+│       ├── lyrics.json  # Lyrics cache
+│       └── search.json  # Search cache
 ├── tests/
 │   ├── __init__.py
 │   └── test_lyriq.py    # Test suite
@@ -387,10 +475,10 @@ Lyriq uses the LRCLib API (https://lrclib.net/api) to fetch lyrics data. The API
 
 ### Caching
 
-To reduce API calls and improve performance, Lyriq caches all retrieved lyrics in a JSON file located at:
+To reduce API calls and improve performance, Lyriq caches all retrieved lyrics in JSON files located in the cache directory:
 
 ```
-<package_location>/cache.json
+<package_location>/cache/
 ```
 
 The cache is thread-safe and automatically writes to disk when new lyrics are added.
