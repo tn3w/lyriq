@@ -570,14 +570,18 @@ def search_lyrics(
     if q:
         cache_key = f"{_normalize_name(q)}"
         params["q"] = _normalize_name(q)
-    elif song_name and artist_name:
-        cache_key = f"{_normalize_name(artist_name)}:{_normalize_name(song_name)}"
+    elif song_name:
         params["track_name"] = _normalize_name(song_name)
-        params["artist_name"] = _normalize_name(artist_name)
+        if artist_name:
+            params["artist_name"] = _normalize_name(artist_name)
+            cache_key = f"{_normalize_name(artist_name)}:{_normalize_name(song_name)}"
+        else:
+            cache_key = _normalize_name(song_name)
+
         if album_name:
             params["album_name"] = _normalize_name(album_name)
     else:
-        raise ValueError("Either q, song_name, or album_name must be provided")
+        raise ValueError("Either q or song_name must be provided")
 
     cached_data = search_cache.get(cache_key)
     if cached_data and isinstance(cached_data, list):
