@@ -609,7 +609,6 @@ class TestSearchLyrics:
             assert results[0].id == "test123"
             assert results[1].id == "test456"
 
-            # Verify no API call was made
             mock_json_get.assert_not_called()
             mock_lyrics_cache.get_bulk_by_lyrics_id.assert_called_once_with(cached_ids)
 
@@ -655,7 +654,7 @@ class TestSearchLyrics:
     def test_search_lyrics_invalid_params(self):
         """Test handling of invalid parameters."""
         with pytest.raises(ValueError) as excinfo:
-            search_lyrics()  # No parameters provided
+            search_lyrics()
 
         assert "Either q or song_name must be provided" in str(
             excinfo.value
