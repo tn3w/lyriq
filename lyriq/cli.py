@@ -315,7 +315,7 @@ def main() -> int:
         version=f"%(prog)s {__version__}",
         help="show version message and exit",
     )
-    parser.add_argument("--id", default=None, help="ID of the song")
+    parser.add_argument("--id", type=int, default=None, help="ID of the song")
     parser.add_argument("song_name", nargs="?", default=None, help="Name of the song")
     parser.add_argument(
         "artist_name", nargs="?", default=None, help="Name of the artist"
@@ -359,7 +359,9 @@ def main() -> int:
     elif args.load:
         lyrics = Lyrics.from_json_file(args.load, args.none_char)
     elif not args.song_name and not args.artist_name:
-        print(f"{Colors.RED}Error: Song name and artist name are required.{Colors.RESET}")
+        print(
+            f"{Colors.RED}Error: Song name and artist name are required.{Colors.RESET}"
+        )
         parser.print_help()
         return 1
     elif not args.song_name:
