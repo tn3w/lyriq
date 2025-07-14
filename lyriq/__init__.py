@@ -10,7 +10,7 @@ Basic usage:
     >>> print(lyrics.plain_lyrics)
 """
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 __author__ = "TN3W"
 __license__ = "Apache-2.0"
 __email__ = "tn3w@protonmail.com"
