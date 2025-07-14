@@ -487,9 +487,6 @@ def get_lyrics_by_id(lyrics_id: str, none_char: str = "♪") -> Optional[Lyrics]
     except LyriqError as e:
         logger.error("Error getting lyrics for %s: %s", lyrics_id, e)
         return None
-    except Exception as e:
-        logger.error("Error getting lyrics for %s: %s", lyrics_id, e)
-        raise e
 
 
 def get_lyrics(
@@ -541,9 +538,6 @@ def get_lyrics(
     except LyriqError as e:
         logger.error("Error getting lyrics for %s by %s: %s", song_name, artist_name, e)
         return None
-    except Exception as e:
-        logger.error("Error getting lyrics for %s by %s: %s", song_name, artist_name, e)
-        raise e
 
 
 def search_lyrics(
