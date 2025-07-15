@@ -12,6 +12,9 @@ import json
 import os
 import tempfile
 import time
+import urllib.error
+import urllib.request
+import email.message
 from unittest import mock
 
 import pytest
@@ -26,6 +29,10 @@ from lyriq.lyriq import (
     get_lyrics_by_id,
     search_lyrics,
     to_plain_lyrics,
+    request_challenge,
+    verify_nonce,
+    generate_publish_token,
+    publish_lyrics,
 )
 
 
@@ -656,9 +663,7 @@ class TestSearchLyrics:
         with pytest.raises(ValueError) as excinfo:
             search_lyrics()
 
-        assert "Either q or song_name must be provided" in str(
-            excinfo.value
-        )
+        assert "Either q or song_name must be provided" in str(excinfo.value)
 
     def test_search_lyrics_api_error(self):
         """Test handling of API error."""
@@ -776,6 +781,216 @@ class TestLyriqError:
         assert error.name == "Not Found"
         assert error.message == "The requested resource was not found"
         assert "404 Not Found: The requested resource was not found" in str(error)
+
+
+class TestVerifyNonce:
+    """Tests for the verify_nonce function."""
+
+    def test_verify_nonce_true(self):
+        """Test the verify_nonce function with valid nonce."""
+        target_bytes = bytes.fromhex(
+            "000000FF00000000000000000000000000000000000000000000000000000000"
+        )
+        result_bytes = bytes.fromhex(
+            "000000AA00000000000000000000000000000000000000000000000000000000"
+        )
+
+        assert verify_nonce(result_bytes, target_bytes) is True
+
+    def test_verify_nonce_false(self):
+        """Test the verify_nonce function with invalid nonce."""
+        target_bytes = bytes.fromhex(
+            "000000AA00000000000000000000000000000000000000000000000000000000"
+        )
+        result_bytes = bytes.fromhex(
+            "000000FF00000000000000000000000000000000000000000000000000000000"
+        )
+
+        assert verify_nonce(result_bytes, target_bytes) is False
+
+    def test_verify_nonce_equal(self):
+        """Test the verify_nonce function with equal values."""
+        target_bytes = bytes.fromhex(
+            "000000AA00000000000000000000000000000000000000000000000000000000"
+        )
+        result_bytes = bytes.fromhex(
+            "000000AA00000000000000000000000000000000000000000000000000000000"
+        )
+
+        assert verify_nonce(result_bytes, target_bytes) is True
+
+    def test_verify_nonce_different_lengths(self):
+        """Test the verify_nonce function with different length inputs."""
+        target_bytes = bytes.fromhex("000000AA00000000")
+        result_bytes = bytes.fromhex("000000AA0000000000000000")
+
+        assert verify_nonce(result_bytes, target_bytes) is False
+
+
+class TestRequestChallenge:
+    """Tests for the request_challenge function."""
+
+    @mock.patch("urllib.request.urlopen")
+    def test_request_challenge_success(self, mock_urlopen):
+        """Test successful challenge request."""
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "prefix": "TestPrefix123",
+                "target": "000000FF00000000000000000000000000000000000000000000000000000000",
+            }
+        ).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        prefix, target = request_challenge()
+
+        assert prefix == "TestPrefix123"
+        assert (
+            target == "000000FF00000000000000000000000000000000000000000000000000000000"
+        )
+        mock_urlopen.assert_called_once()
+
+    @mock.patch("urllib.request.urlopen")
+    def test_request_challenge_error(self, mock_urlopen):
+        """Test handling API error."""
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "statusCode": 500,
+                "name": "ServerError",
+                "message": "Internal server error",
+            }
+        ).encode("utf-8")
+
+        headers = email.message.Message()
+        headers["Content-Type"] = "application/json"
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://example.com", 500, "Server Error", headers, mock_response
+        )
+
+        with pytest.raises(LyriqError) as excinfo:
+            request_challenge()
+
+        assert excinfo.value.code == 500
+        assert excinfo.value.name == "ServerError"
+        assert "Internal server error" in excinfo.value.message
+
+
+class TestGeneratePublishToken:
+    """Tests for the generate_publish_token function."""
+
+    @mock.patch("lyriq.lyriq.request_challenge")
+    @mock.patch("lyriq.lyriq.verify_nonce")
+    def test_generate_publish_token(self, mock_verify_nonce, mock_request_challenge):
+        """Test generating a publish token."""
+        mock_request_challenge.return_value = (
+            "TestPrefix123",
+            "000000FF00000000000000000000000000000000000000000000000000000000",
+        )
+        mock_verify_nonce.return_value = True
+
+        token = generate_publish_token()
+
+        assert token.startswith("TestPrefix123:")
+        assert token.count(":") == 1
+        mock_request_challenge.assert_called_once()
+        mock_verify_nonce.assert_called_once()
+
+
+class TestPublishLyrics:
+    """Tests for the publish_lyrics function."""
+
+    @mock.patch("lyriq.lyriq.generate_publish_token")
+    @mock.patch("urllib.request.urlopen")
+    def test_publish_lyrics_success(self, mock_urlopen, mock_generate_token):
+        """Test successful lyrics publishing."""
+        mock_generate_token.return_value = "TestPrefix123:456789"
+
+        mock_response = mock.MagicMock()
+        mock_response.status = 201
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        result = publish_lyrics(
+            track_name="Test Track",
+            artist_name="Test Artist",
+            album_name="Test Album",
+            duration=180,
+            plain_lyrics="Test lyrics",
+            synced_lyrics="[00:00.00]Test lyrics",
+        )
+
+        assert result is True
+        mock_generate_token.assert_called_once()
+        mock_urlopen.assert_called_once()
+
+        args, _ = mock_urlopen.call_args
+        request = args[0]
+        assert "X-publish-token" in request.headers
+        assert request.headers["X-publish-token"] == "TestPrefix123:456789"
+        assert "Content-type" in request.headers
+        assert request.headers["Content-type"] == "application/json"
+
+        request_data = request.data.decode("utf-8")
+        assert "trackName" in request_data
+        assert "artistName" in request_data
+        assert "albumName" in request_data
+        assert "Test Track" in request_data
+        assert "Test Artist" in request_data
+        assert "Test Album" in request_data
+
+    @mock.patch("lyriq.lyriq.generate_publish_token")
+    @mock.patch("urllib.request.urlopen")
+    def test_publish_lyrics_non_success_status(self, mock_urlopen, mock_generate_token):
+        """Test handling of non-success status code."""
+        mock_generate_token.return_value = "TestPrefix123:456789"
+
+        mock_response = mock.MagicMock()
+        mock_response.status = 400
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        result = publish_lyrics(
+            track_name="Test Track",
+            artist_name="Test Artist",
+            album_name="Test Album",
+            duration=180,
+        )
+
+        assert result is False
+
+    @mock.patch("lyriq.lyriq.generate_publish_token")
+    @mock.patch("urllib.request.urlopen")
+    def test_publish_lyrics_http_error(self, mock_urlopen, mock_generate_token):
+        """Test handling HTTP error."""
+        mock_generate_token.return_value = "TestPrefix123:456789"
+
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "statusCode": 400,
+                "name": "IncorrectPublishTokenError",
+                "message": "The provided publish token is incorrect",
+            }
+        ).encode("utf-8")
+
+        headers = email.message.Message()
+        headers["Content-Type"] = "application/json"
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://example.com", 400, "Bad Request", headers, mock_response
+        )
+
+        with pytest.raises(LyriqError) as excinfo:
+            publish_lyrics(
+                track_name="Test Track",
+                artist_name="Test Artist",
+                album_name="Test Album",
+                duration=180,
+            )
+
+        assert excinfo.value.code == 400
+        assert excinfo.value.name == "IncorrectPublishTokenError"
+        assert "incorrect" in excinfo.value.message
 
 
 if __name__ == "__main__":

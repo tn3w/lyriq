@@ -37,9 +37,9 @@ pip install -e ".[dev]"
 
 ```python
 import sys
-from lyriq import Lyrics, get_lyrics
+from lyriq import get_lyrics
 
-lyrics: Optional[Lyrics] = get_lyrics("Circles", "Post Malone")
+lyrics = get_lyrics("Circles", "Post Malone")
 if not lyrics:
     print("No lyrics found for 'Circles' by Post Malone")
     sys.exit(0)
@@ -50,6 +50,7 @@ print(f"Track: {lyrics.track_name}")
 print(f"Artist: {lyrics.artist_name}")
 print(f"Album: {lyrics.album_name}")
 print(f"Duration: {lyrics.duration} seconds")
+print(f"Instrumental: {'Yes' if lyrics.synced_lyrics else 'No'}")
 print("\nPlain Lyrics:")
 print("-" * 40)
 print(lyrics.plain_lyrics)
@@ -82,6 +83,25 @@ from lyriq import to_plain_lyrics, get_lyrics
 lyrics = get_lyrics("Circles", "Post Malone")
 plain_text = to_plain_lyrics(lyrics)
 print(plain_text)
+```
+
+### Search for Lyrics
+
+```python
+from lyriq import search_lyrics
+
+# Search by general query
+results = search_lyrics(q="Circles Post Malone")
+
+# Or search by song and artist name
+results = search_lyrics(song_name="Circles", artist_name="Post Malone")
+
+if results:
+    print(f"Found {len(results)} results:")
+    for i, lyrics in enumerate(results[:3]):  # Display first 3 results
+        print(f"{i+1}. {lyrics.track_name} by {lyrics.artist_name} ({lyrics.album_name})")
+else:
+    print("No results found")
 ```
 
 ### Save and Load Lyrics
@@ -240,6 +260,43 @@ Converts a `Lyrics` object or lyrics dictionary to plain text.
     - `none_char`: Character to use for empty lines
 - **Returns**: Plain text lyrics as a string
 
+#### `request_challenge()`
+
+Requests a cryptographic challenge from the API for generating a publish token.
+
+- **Returns**: A tuple containing `(prefix, target)` for the proof-of-work challenge
+- **Raises**: `LyriqError` if the API returns an error
+
+#### `verify_nonce(result_bytes, target_bytes)`
+
+Verifies if a nonce satisfies the target requirement for the proof-of-work challenge.
+
+- **Parameters**:
+    - `result_bytes`: The hashed result as bytes
+    - `target_bytes`: The target as bytes
+- **Returns**: `True` if the nonce satisfies the target, `False` otherwise
+
+#### `generate_publish_token()`
+
+Generates a valid publish token by solving a proof-of-work challenge.
+
+- **Returns**: A valid publish token in the format `{prefix}:{nonce}`
+- **Raises**: `LyriqError` if there is an error requesting the challenge
+
+#### `publish_lyrics(track_name, artist_name, album_name, duration, plain_lyrics="", synced_lyrics="")`
+
+Publishes lyrics to the LRCLIB API.
+
+- **Parameters**:
+    - `track_name`: Name of the track
+    - `artist_name`: Name of the artist
+    - `album_name`: Name of the album
+    - `duration`: Duration of the track in seconds
+    - `plain_lyrics`: Plain text lyrics (optional)
+    - `synced_lyrics`: Synchronized lyrics (optional)
+- **Returns**: `True` if the publish was successful, `False` otherwise
+- **Raises**: `LyriqError` if there is an error publishing the lyrics
+
 ### Lyrics Class
 
 #### Properties
@@ -297,125 +354,14 @@ Read lyrics from a JSON file.
 
 ## Examples
 
-### Fetching and Displaying Lyrics
+See the examples directory for practical usage examples:
 
-```python
-import sys
-from lyriq import Lyrics, get_lyrics
-
-lyrics: Optional[Lyrics] = get_lyrics("Circles", "Post Malone")
-if not lyrics:
-    print("No lyrics found for 'Circles' by Post Malone")
-    sys.exit(0)
-
-print(f"ID: {lyrics.id}")
-print(f"Name: {lyrics.name}")
-print(f"Track: {lyrics.track_name}")
-print(f"Artist: {lyrics.artist_name}")
-print(f"Album: {lyrics.album_name}")
-print(f"Duration: {lyrics.duration} seconds")
-print(f"Instrumental: {lyrics.instrumental}")
-print("\nPlain Lyrics:")
-print("-" * 40)
-print(lyrics.plain_lyrics)
-print("\nSynchronized Lyrics (timestamp: lyric):")
-print("-" * 40)
-
-for timestamp, line in sorted(lyrics.lyrics.items()):
-    print(f"[{timestamp}] {line}")
-
-print("-" * 40)
-```
-
-### Working with Synchronized Lyrics
-
-```python
-import time
-from lyriq import get_lyrics
-
-# Get lyrics for a song with synchronized lyrics
-lyrics = get_lyrics("Circles", "Post Malone")
-
-if lyrics and lyrics.synced_lyrics:
-    # Sort timestamps for playback
-    timed_lyrics = [(float(ts.split(":")[0]) * 60 + float(ts.split(":")[1]), line)
-                    for ts, line in lyrics.lyrics.items()]
-    timed_lyrics.sort()
-
-    # Simple playback simulation
-    start_time = time.time()
-    current_idx = 0
-
-    print("Press Ctrl+C to stop playback\n")
-
-    try:
-        while current_idx < len(timed_lyrics):
-            elapsed = time.time() - start_time
-
-            # Display lyrics at the current timestamp
-            if current_idx < len(timed_lyrics) and elapsed >= timed_lyrics[current_idx][0]:
-                print(f"[{elapsed:.2f}] {timed_lyrics[current_idx][1]}")
-                current_idx += 1
-
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\nPlayback stopped")
-```
-
-### Converting Between Formats
-
-```python
-from lyriq import Lyrics, get_lyrics, to_plain_lyrics
-
-# Get lyrics
-lyrics = get_lyrics("Circles", "Post Malone")
-
-if lyrics:
-    # Convert to plain text
-    plain = to_plain_lyrics(lyrics)
-    print(plain)
-
-    # Save to files
-    lyrics.to_plain_file("circles.txt")
-    lyrics.to_json_file("circles.json")
-
-    empty_lyrics = Lyrics(
-        lyrics={}, synced_lyrics="", plain_lyrics="",
-        id="", name="", track_name="", artist_name="",
-        album_name="", duration=0, instrumental=False
-    )
-
-    loaded = empty_lyrics.from_json_file("circles.json")
-    print(f"Loaded: {loaded.track_name} by {loaded.artist_name}")
-```
-
-### Searching for Lyrics
-
-```python
-from lyriq import search_lyrics
-
-# Search by general query
-search_results = search_lyrics(q="Circles Post Malone")
-
-# Search by song and artist name
-search_results = search_lyrics(song_name="Circles", artist_name="Post Malone")
-
-# Search with album name for better results
-search_results = search_lyrics(
-    song_name="Circles", 
-    artist_name="Post Malone", 
-    album_name="Hollywood's Bleeding"
-)
-
-# Process search results
-if search_results:
-    for idx, lyrics in enumerate(search_results):
-        print(f"{idx+1}. {lyrics.track_name} by {lyrics.artist_name}")
-        
-    # Use the first result
-    first_result = search_results[0]
-    print(f"Selected: {first_result.track_name} by {first_result.artist_name}")
-```
+- `examples/basic_usage.py` - Basic usage of the library
+- `examples/fetch_by_id.py` - Fetching lyrics by ID
+- `examples/search_lyrics.py` - Searching for lyrics
+- `examples/synced_lyrics.py` - Working with synchronized lyrics
+- `examples/format_conversion.py` - Converting between formats
+- `examples/publishing_lyrics.py` - Publishing lyrics to the API
 
 ## Development
 
@@ -428,6 +374,13 @@ lyriq/
 │   │   ├── python-tests.yml
 │   │   └── python-publish.yml
 ├── environment.yml      # Environment file
+├── examples/            # Example files demonstrating usage
+│   ├── basic_usage.py
+│   ├── fetch_by_id.py
+│   ├── search_lyrics.py
+│   ├── synced_lyrics.py
+│   ├── format_conversion.py
+│   └── publishing_lyrics.py
 ├── lyriq/
 │   ├── __init__.py      # Package exports
 │   ├── __main__.py      # CLI entry point

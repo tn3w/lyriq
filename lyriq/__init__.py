@@ -10,7 +10,7 @@ Basic usage:
     >>> print(lyrics.plain_lyrics)
 """
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 __author__ = "TN3W"
 __license__ = "Apache-2.0"
 __email__ = "tn3w@protonmail.com"
@@ -23,6 +23,10 @@ from .lyriq import (
     get_lyrics_by_id,
     search_lyrics,
     to_plain_lyrics,
+    request_challenge,
+    verify_nonce,
+    generate_publish_token,
+    publish_lyrics,
 )
 
 __all__ = [
@@ -32,4 +36,8 @@ __all__ = [
     "get_lyrics_by_id",
     "search_lyrics",
     "to_plain_lyrics",
+    "request_challenge",
+    "verify_nonce",
+    "generate_publish_token",
+    "publish_lyrics",
 ]

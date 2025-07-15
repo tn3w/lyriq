@@ -12,8 +12,9 @@ import threading
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 from urllib.error import HTTPError
+import hashlib
 
 from . import __version__
 
@@ -613,3 +614,175 @@ def search_lyrics(
     except LyriqError as e:
         logger.error("Error searching for lyrics: %s", e)
         return None
+
+
+def request_challenge() -> Tuple[str, str]:
+    """
+    Request a challenge from the API for generating a publish token.
+
+    Returns:
+        A tuple containing (prefix, target) for the proof-of-work challenge.
+
+    Raises:
+        LyriqError: If the API returns an error.
+    """
+    url = f"{API_URL}/request-challenge"
+    headers = {
+        "User-Agent": f"Lyriq v{__version__} (https://github.com/TN3W/lyriq)",
+        "Content-Type": "application/json",
+    }
+
+    req = urllib.request.Request(url, method="POST", headers=headers, data=b"")
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = response.read().decode("utf-8")
+            challenge = json.loads(data)
+            return challenge["prefix"], challenge["target"]
+    except HTTPError as e:
+        error_data = e.read().decode("utf-8")
+        try:
+            error_json = json.loads(error_data)
+            raise LyriqError(
+                error_json.get("statusCode", e.code),
+                error_json.get("name", "Unknown error"),
+                error_json.get("message", "Unknown error"),
+            ) from e
+        except json.JSONDecodeError as exc:
+            raise exc from e
+
+
+def verify_nonce(result_bytes: bytes, target_bytes: bytes) -> bool:
+    """
+    Verify if a nonce satisfies the target requirement.
+
+    Args:
+        result_bytes: The hashed result as bytes.
+        target_bytes: The target as bytes.
+
+    Returns:
+        True if the nonce satisfies the target, False otherwise.
+    """
+    if len(result_bytes) != len(target_bytes):
+        return False
+
+    for r_byte, t_byte in zip(result_bytes, target_bytes):
+        if r_byte > t_byte:
+            return False
+        if r_byte < t_byte:
+            break
+
+    return True
+
+
+def generate_publish_token(prefix: str, target: str) -> str:
+    """
+    Generate a valid publish token by solving a proof-of-work challenge.
+    Args:
+        prefix: The prefix to use for the challenge.
+        target: The target to use for the challenge. Must be a hex string.
+
+    Returns:
+        A valid publish token in the format {prefix}:{nonce}.
+
+    Raises:
+        LyriqError: If there is an error requesting the challenge.
+    """
+    target_bytes = bytes.fromhex(target)
+
+    nonce = 0
+    while True:
+        input_string = f"{prefix}{nonce}"
+        hashed = hashlib.sha256(input_string.encode()).digest()
+
+        if verify_nonce(hashed, target_bytes):
+            break
+
+        nonce += 1
+
+    return f"{prefix}:{nonce}"
+
+
+def publish_lyrics(
+    track_name: str,
+    artist_name: str,
+    album_name: str,
+    duration: int,
+    plain_lyrics: str = "",
+    synced_lyrics: str = "",
+) -> bool:
+    """
+    Publish lyrics to the API.
+
+    Args:
+        track_name: Name of the track.
+        artist_name: Name of the artist.
+        album_name: Name of the album.
+        duration: Duration of the track in seconds.
+        plain_lyrics: Plain text lyrics (optional).
+        synced_lyrics: Synchronized lyrics (optional).
+
+    Returns:
+        True if the publish was successful, False otherwise.
+
+    Raises:
+        LyriqError: If there is an error publishing the lyrics.
+    """
+    url = f"{API_URL}/publish"
+
+    prefix, target = request_challenge()
+    publish_token = generate_publish_token(prefix, target)
+
+    data = {
+        "trackName": track_name,
+        "artistName": artist_name,
+        "albumName": album_name,
+        "duration": duration,
+        "plainLyrics": plain_lyrics,
+        "syncedLyrics": synced_lyrics,
+    }
+
+    headers = {
+        "User-Agent": f"Lyriq v{__version__} (https://github.com/TN3W/lyriq)",
+        "Content-Type": "application/json",
+        "X-Publish-Token": publish_token,
+    }
+
+    try:
+        data_bytes = json.dumps(data).encode("utf-8")
+        req = urllib.request.Request(
+            url, method="POST", headers=headers, data=data_bytes
+        )
+
+        with urllib.request.urlopen(req) as response:
+            if response.status == 201:
+                logger.info(
+                    "Successfully published lyrics for %s by %s",
+                    track_name,
+                    artist_name,
+                )
+                return True
+            else:
+                logger.error(
+                    "Failed to publish lyrics for %s by %s: %s",
+                    track_name,
+                    artist_name,
+                    response.status,
+                )
+                return False
+    except HTTPError as e:
+        error_data = e.read().decode("utf-8")
+        try:
+            error_json = json.loads(error_data)
+            logger.error(
+                "Error publishing lyrics for %s by %s: %s",
+                track_name,
+                artist_name,
+                error_json.get("message", "Unknown error"),
+            )
+            raise LyriqError(
+                error_json.get("statusCode", e.code),
+                error_json.get("name", "Unknown error"),
+                error_json.get("message", "Unknown error"),
+            ) from e
+        except json.JSONDecodeError as exc:
+            raise exc from e
