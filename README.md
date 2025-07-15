@@ -276,12 +276,15 @@ Verifies if a nonce satisfies the target requirement for the proof-of-work chall
     - `target_bytes`: The target as bytes
 - **Returns**: `True` if the nonce satisfies the target, `False` otherwise
 
-#### `generate_publish_token()`
+#### `generate_publish_token(prefix, target)`
 
 Generates a valid publish token by solving a proof-of-work challenge.
 
+- **Parameters**:
+    - `prefix`: The prefix string provided by the challenge
+    - `target`: The target string in hexadecimal format provided by the challenge
 - **Returns**: A valid publish token in the format `{prefix}:{nonce}`
-- **Raises**: `LyriqError` if there is an error requesting the challenge
+- **Raises**: `LyriqError` if there is an error with the token generation
 
 #### `publish_lyrics(track_name, artist_name, album_name, duration, plain_lyrics="", synced_lyrics="")`
 

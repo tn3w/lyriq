@@ -880,31 +880,36 @@ class TestRequestChallenge:
 class TestGeneratePublishToken:
     """Tests for the generate_publish_token function."""
 
-    @mock.patch("lyriq.lyriq.request_challenge")
     @mock.patch("lyriq.lyriq.verify_nonce")
-    def test_generate_publish_token(self, mock_verify_nonce, mock_request_challenge):
+    def test_generate_publish_token(self, mock_verify_nonce):
         """Test generating a publish token."""
-        mock_request_challenge.return_value = (
-            "TestPrefix123",
-            "000000FF00000000000000000000000000000000000000000000000000000000",
-        )
+        prefix = "TestPrefix123"
+        target = "000000FF00000000000000000000000000000000000000000000000000000000"
+
         mock_verify_nonce.return_value = True
 
-        token = generate_publish_token()
+        token = generate_publish_token(prefix, target)
 
-        assert token.startswith("TestPrefix123:")
+        assert token.startswith(f"{prefix}:")
         assert token.count(":") == 1
-        mock_request_challenge.assert_called_once()
         mock_verify_nonce.assert_called_once()
 
 
 class TestPublishLyrics:
     """Tests for the publish_lyrics function."""
 
+    @mock.patch("lyriq.lyriq.request_challenge")
     @mock.patch("lyriq.lyriq.generate_publish_token")
     @mock.patch("urllib.request.urlopen")
-    def test_publish_lyrics_success(self, mock_urlopen, mock_generate_token):
+    def test_publish_lyrics_success(
+        self, mock_urlopen, mock_generate_token, mock_request_challenge
+    ):
         """Test successful lyrics publishing."""
+        mock_request_challenge.return_value = (
+            "TestPrefix123",
+            "000000FF00000000000000000000000000000000000000000000000000000000",
+        )
+
         mock_generate_token.return_value = "TestPrefix123:456789"
 
         mock_response = mock.MagicMock()
@@ -939,10 +944,18 @@ class TestPublishLyrics:
         assert "Test Artist" in request_data
         assert "Test Album" in request_data
 
+    @mock.patch("lyriq.lyriq.request_challenge")
     @mock.patch("lyriq.lyriq.generate_publish_token")
     @mock.patch("urllib.request.urlopen")
-    def test_publish_lyrics_non_success_status(self, mock_urlopen, mock_generate_token):
+    def test_publish_lyrics_non_success_status(
+        self, mock_urlopen, mock_generate_token, mock_request_challenge
+    ):
         """Test handling of non-success status code."""
+        mock_request_challenge.return_value = (
+            "TestPrefix123",
+            "000000FF00000000000000000000000000000000000000000000000000000000",
+        )
+
         mock_generate_token.return_value = "TestPrefix123:456789"
 
         mock_response = mock.MagicMock()
@@ -958,10 +971,18 @@ class TestPublishLyrics:
 
         assert result is False
 
+    @mock.patch("lyriq.lyriq.request_challenge")
     @mock.patch("lyriq.lyriq.generate_publish_token")
     @mock.patch("urllib.request.urlopen")
-    def test_publish_lyrics_http_error(self, mock_urlopen, mock_generate_token):
+    def test_publish_lyrics_http_error(
+        self, mock_urlopen, mock_generate_token, mock_request_challenge
+    ):
         """Test handling HTTP error."""
+        mock_request_challenge.return_value = (
+            "TestPrefix123",
+            "000000FF00000000000000000000000000000000000000000000000000000000",
+        )
+
         mock_generate_token.return_value = "TestPrefix123:456789"
 
         mock_response = mock.MagicMock()
