@@ -13,7 +13,6 @@ import os
 import tempfile
 import time
 import urllib.error
-import urllib.request
 import email.message
 from unittest import mock
 
@@ -33,6 +32,7 @@ from lyriq.lyriq import (
     verify_nonce,
     generate_publish_token,
     publish_lyrics,
+    EmptyLyricsError,
 )
 
 
@@ -147,6 +147,76 @@ class TestLyricsClass:
         )
         assert bool(empty_lyrics) is False
 
+    def test_to_plain_string(self, sample_lyrics_object):
+        """Test converting lyrics to plain string."""
+        plain_string = sample_lyrics_object.to_plain_string()
+
+        assert plain_string is not None
+        assert "Test Lyrics" in plain_string
+        assert "Second Line" in plain_string
+
+        plain_only = Lyrics(
+            lyrics={},
+            synced_lyrics="",
+            plain_lyrics="Plain lyrics only",
+            id="test",
+            name="Test",
+            track_name="Test Track",
+            artist_name="Test Artist",
+            album_name="Test Album",
+            duration=180,
+            instrumental=False,
+        )
+        plain_string = plain_only.to_plain_string()
+        assert plain_string is not None and "Plain lyrics only" in plain_string
+
+        empty_lyrics = Lyrics(
+            lyrics={},
+            synced_lyrics="",
+            plain_lyrics="",
+            id="empty",
+            name="Empty",
+            track_name="Empty",
+            artist_name="Empty",
+            album_name="Empty",
+            duration=0,
+            instrumental=False,
+        )
+        assert empty_lyrics.to_plain_string() is None
+
+    def test_to_lrc_string(self, sample_lyrics_object):
+        """Test converting lyrics to LRC string."""
+        lrc_string = sample_lyrics_object.to_lrc_string()
+
+        assert lrc_string is not None
+        assert "[ti:Test Track]" in lrc_string
+        assert "[ar:Test Artist]" in lrc_string
+        assert "[al:Test Album]" in lrc_string
+        assert "[length:180]" in lrc_string
+        assert "Test Lyrics" in lrc_string
+
+    def test_empty_lyrics_error(self):
+        """Test EmptyLyricsError when trying to save empty lyrics."""
+        empty_lyrics = Lyrics(
+            lyrics={},
+            synced_lyrics="",
+            plain_lyrics="",
+            id="empty",
+            name="Empty",
+            track_name="Empty",
+            artist_name="Empty",
+            album_name="Empty",
+            duration=0,
+            instrumental=False,
+        )
+
+        with pytest.raises(EmptyLyricsError) as excinfo:
+            empty_lyrics.to_plain_file("test_empty.txt")
+
+        assert "Cannot convert empty lyrics to plain text file" in str(excinfo.value)
+        assert excinfo.value.code == 400
+        assert excinfo.value.name == "EmptyLyricsError"
+
     def test_to_plain_file(self, sample_lyrics_object, temp_output_file):
         """Test writing lyrics to a plain text file."""
         sample_lyrics_object.to_plain_file(temp_output_file)
@@ -161,7 +231,7 @@ class TestLyricsClass:
         """Test writing synced lyrics to a plain text file."""
         lyrics = Lyrics(
             lyrics={"00:00.00": "First Line", "00:05.00": "Second Line"},
-            synced_lyrics="",
+            synced_lyrics="[00:00.00]First Line\n[00:05.00]Second Line",
             plain_lyrics="",
             id="test",
             name="Test",
@@ -179,6 +249,68 @@ class TestLyricsClass:
             content = f.read()
             assert "00:00.00 First Line" in content
             assert "00:05.00 Second Line" in content
+
+    def test_to_lrc_file(self, sample_lyrics_object, temp_output_file):
+        """Test writing lyrics to a LRC file."""
+        sample_lyrics_object.to_lrc_file(temp_output_file)
+
+        assert os.path.exists(temp_output_file)
+        with open(temp_output_file, "r", encoding="utf-8") as f:
+            content = f.read()
+            assert "[ti:Test Track]" in content
+            assert "[ar:Test Artist]" in content
+            assert "[al:Test Album]" in content
+            assert "Test Lyrics" in content
+
+    def test_from_lrc_string(self):
+        """Test reading lyrics from a LRC string."""
+        lrc_content = """[ti:Test Title]
+[ar:Test Artist]
+[al:Test Album]
+[length:180]
+[x-id:test123]
+
+[00:00.00]First Line
+[00:05.00]Second Line
+[00:10.00]"""
+
+        lyrics = Lyrics.from_lrc_string(lrc_content)
+
+        assert lyrics.track_name == "Test Title"
+        assert lyrics.artist_name == "Test Artist"
+        assert lyrics.album_name == "Test Album"
+        assert lyrics.id == "test123"
+        assert lyrics.duration == 180
+        assert "00:00.00" in lyrics.lyrics
+        assert lyrics.lyrics["00:00.00"] == "First Line"
+        assert "00:05.00" in lyrics.lyrics
+        assert lyrics.lyrics["00:05.00"] == "Second Line"
+        assert lyrics.lyrics["00:10.00"] == "♪"
+
+    def test_from_lrc_file(self, temp_output_file):
+        """Test reading lyrics from a LRC file."""
+        lrc_content = """[ti:Test Title]
+[ar:Test Artist]
+[al:Test Album]
+[length:180]
+[x-id:test123]
+
+[00:00.00]First Line
+[00:05.00]Second Line
+[00:10.00]"""
+
+        with open(temp_output_file, "w", encoding="utf-8") as f:
+            f.write(lrc_content)
+
+        lyrics = Lyrics.from_lrc_file(temp_output_file)
+
+        assert lyrics.track_name == "Test Title"
+        assert lyrics.artist_name == "Test Artist"
+        assert lyrics.album_name == "Test Album"
+        assert lyrics.id == "test123"
+        assert lyrics.duration == 180
+        assert "00:00.00" in lyrics.lyrics
+        assert lyrics.lyrics["00:00.00"] == "First Line"
 
     def test_to_json_file(self, sample_lyrics_object, temp_output_file):
         """Test writing lyrics to a JSON file."""
@@ -741,6 +873,16 @@ class TestToPlainLyrics:
             "00:05.00": "Line 2",
             "00:10.00": "",
         }
+
+        result = to_plain_lyrics(data)
+
+        assert "Line 1" in result
+        assert "Line 2" in result
+        assert "♪" in result
+
+    def test_to_plain_lyrics_from_string(self):
+        """Test converting a synced lyrics string to plain text."""
+        data = "[00:00.00]Line 1\n[00:05.00]Line 2\n[00:10.00]\n"
 
         result = to_plain_lyrics(data)
 

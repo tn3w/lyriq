@@ -8,6 +8,7 @@ from the LRCLib API with caching support.
 import json
 import logging
 import os
+from pydoc import plain
 import threading
 import urllib.parse
 import urllib.request
@@ -50,8 +51,8 @@ class _Cache:
         """Load the cache from the disk if it exists."""
         if os.path.exists(self.cache_file_path):
             try:
-                with open(self.cache_file_path, "r", encoding="utf-8") as f:
-                    self.cache = json.load(f)
+                with open(self.cache_file_path, "r", encoding="utf-8") as file_stream:
+                    self.cache = json.load(file_stream)
             except Exception as e:
                 logger.error("Error loading cache: %s", e)
                 self.cache = {}
@@ -110,8 +111,8 @@ class _Cache:
             cache_data: The cache data to write.
         """
         try:
-            with open(self.cache_file_path, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f)
+            with open(self.cache_file_path, "w", encoding="utf-8") as file_stream:
+                json.dump(cache_data, file_stream)
             logger.debug("Cache written to %s", self.cache_file_path)
         except Exception as e:
             logger.error("Error writing cache: %s", e)
@@ -282,20 +283,187 @@ class Lyrics:
         """
         return bool(self.lyrics)
 
-    def to_plain_file(self, file_path: str) -> None:
+    def to_plain_string(self, none_char: Optional[str] = None) -> Optional[str]:
         """
-        Write the Lyrics instance to a plain text file.
+        Convert the Lyrics instance to a plain string.
+
+        Args:
+            none_char: Character to represent empty lines. If not specified, uses the current.
+
+        Returns:
+            Plain string or None.
+        """
+        if self.synced_lyrics:
+            lyrics = self.lyrics
+            if none_char is not None:
+                lyrics = _process_lyrics(lyrics, none_char=none_char)
+
+            result = ""
+            for timestamp, line in lyrics.items():
+                result += f"{timestamp} {line}\n"
+            return result
+
+        if self.plain_lyrics:
+            return f"{self.plain_lyrics}\n"
+
+    def to_plain_file(self, file_path: str, none_char: Optional[str] = None) -> None:
+        """
+        Write the lyrics of the Lyrics instance to a text file.
 
         Args:
             file_path: The path to the file to write.
+            none_char: Character to represent empty lines. If not specified, uses the current.
         """
-        with open(file_path, "a", encoding="utf-8") as f:
-            if self.plain_lyrics and not self.synced_lyrics:
-                f.write(f"{self.plain_lyrics}\n")
-                return
+        plain_string = self.to_plain_string(none_char)
+        if not plain_string:
+            raise EmptyLyricsError("Cannot convert empty lyrics to plain text file")
 
-            for timestamp, line in self.lyrics.items():
-                f.write(f"{timestamp} {line}\n")
+        with open(file_path, "w", encoding="utf-8") as file_stream:
+            file_stream.write(plain_string)
+
+    def to_lrc_string(self) -> str:
+        """
+        Convert the Lyrics instance to a LRC string.
+
+        Args:
+            none_char: Character to represent empty lines. If not specified, uses the current.
+
+        Returns:
+            LRC string.
+        """
+        result = ""
+
+        lrc_info = {
+            "ti": self.track_name,
+            "ar": self.artist_name,
+            "al": self.album_name,
+            "by": self.artist_name,
+            "length": self.duration,
+            "x-name": self.name,
+            "x-id": self.id,
+            "x-instrumental": self.instrumental,
+        }
+        for key, value in lrc_info.items():
+            if not value:
+                continue
+            result += f"[{key}:{str(value)}]\n"
+        result += "\n"
+
+        if self.synced_lyrics:
+            result += self.synced_lyrics
+        elif self.plain_lyrics:
+            result += self.plain_lyrics
+        return result
+
+    def to_lrc_file(self, file_path: str) -> None:
+        """
+        Write the Lyircs instance to a LRC file.
+
+        Args:
+            file_path: The path to the LRC file to write.
+        """
+        with open(file_path, "w", encoding="utf-8") as file_stream:
+            file_stream.write(self.to_lrc_string())
+
+    @classmethod
+    def from_lrc_string(cls, lrc_string: str, none_char: str = "♪") -> "Lyrics":
+        """
+        Init a Lyrics instance from a LRC string.
+
+        Args:
+            lrc_string: The LRC string.
+            none_char: Character to use for empty lines.
+
+        Returns:
+            A new Lyrics instance.
+        """
+        data = {
+            "syncedLyrics": "",
+            "plainLyrics": "",
+            "id": "",
+            "name": "",
+            "trackName": "",
+            "artistName": "",
+            "albumName": "",
+            "duration": 0,
+            "instrumental": False,
+        }
+
+        lines = lrc_string.split("\n")
+        metadata_lines = []
+        lyrics_lines = []
+
+        metadata_section = True
+        for line in lines:
+            line = line.strip()
+            if not line:
+                metadata_section = False
+                continue
+
+            if (
+                metadata_section
+                and line.startswith("[")
+                and ":" in line
+                and line.endswith("]")
+            ):
+                metadata_lines.append(line)
+            else:
+                lyrics_lines.append(line)
+
+        for line in metadata_lines:
+            tag = line[1 : line.find(":")]
+            value = line[line.find(":") + 1 : line.find("]")]
+
+            if tag == "ti":
+                data["trackName"] = value
+                data["name"] = value
+            elif tag == "ar":
+                data["artistName"] = value
+            elif tag == "al":
+                data["albumName"] = value
+            elif tag == "length":
+                try:
+                    data["duration"] = float(value)
+                except ValueError:
+                    pass
+            elif tag == "x-name":
+                data["name"] = value
+            elif tag == "x-id":
+                data["id"] = value
+            elif tag == "x-instrumental":
+                data["instrumental"] = value.lower() == "true"
+
+        has_sync_format = all(
+            line.startswith("[") and "]" in line and line.index("]") > 1
+            for line in lyrics_lines
+            if line.strip()
+        )
+
+        if has_sync_format:
+            synced_lyrics = "\n".join(lyrics_lines)
+            data["syncedLyrics"] = synced_lyrics
+            data["plainLyrics"] = to_plain_lyrics(synced_lyrics, none_char=none_char)
+        else:
+            data["plainLyrics"] = "\n".join(lyrics_lines)
+
+        return cls.from_dict(data, none_char=none_char)
+
+    @classmethod
+    def from_lrc_file(cls, file_path: str, none_char: str = "♪") -> "Lyrics":
+        """
+        Read a Lyrics instance from a LRC file.
+
+        Args:
+            file_path: The path to the LRC file to read.
+            none_char: Character to use for empty lines.
+
+        Returns:
+            A new Lyrics instance.
+        """
+        with open(file_path, "r", encoding="utf-8") as file_stream:
+            content = file_stream.read()
+
+        return cls.from_lrc_string(content, none_char=none_char)
 
     def to_json_file(self, file_path: str) -> None:
         """
@@ -304,8 +472,8 @@ class Lyrics:
         Args:
             file_path: The path to the JSON file to write.
         """
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f)
+        with open(file_path, "w", encoding="utf-8") as file_stream:
+            json.dump(self.to_dict(), file_stream)
 
     @classmethod
     def from_json_file(cls, file_path: str, none_char: str = "♪") -> "Lyrics":
@@ -319,32 +487,32 @@ class Lyrics:
         Returns:
             A new Lyrics instance.
         """
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(file_path, "r", encoding="utf-8") as file_stream:
+            data = json.load(file_stream)
 
-            if "synced_lyrics" in data:
-                api_data = {
-                    "syncedLyrics": data.get("synced_lyrics", ""),
-                    "plainLyrics": data.get("plain_lyrics", ""),
-                    "id": data.get("id", ""),
-                    "name": data.get("name", ""),
-                    "trackName": data.get("track_name", ""),
-                    "artistName": data.get("artist_name", ""),
-                    "albumName": data.get("album_name", ""),
-                    "duration": data.get("duration", 0),
-                    "instrumental": data.get("instrumental", False),
-                }
-                return cls.from_dict(api_data, none_char=none_char)
+        if "synced_lyrics" in data:
+            api_data = {
+                "syncedLyrics": data.get("synced_lyrics", ""),
+                "plainLyrics": data.get("plain_lyrics", ""),
+                "id": data.get("id", ""),
+                "name": data.get("name", ""),
+                "trackName": data.get("track_name", ""),
+                "artistName": data.get("artist_name", ""),
+                "albumName": data.get("album_name", ""),
+                "duration": data.get("duration", 0),
+                "instrumental": data.get("instrumental", False),
+            }
+            return cls.from_dict(api_data, none_char=none_char)
 
-            return cls.from_dict(data, none_char=none_char)
+        return cls.from_dict(data, none_char=none_char)
 
 
-def to_plain_lyrics(lyrics: Union[Lyrics, dict], none_char: str = "♪") -> str:
+def to_plain_lyrics(lyrics: Union[Lyrics, dict, str], none_char: str = "♪") -> str:
     """
-    Convert a Lyrics instance or synced lyrics dictionary to plain text lyrics.
+    Convert a Lyrics instance or synced lyrics dictionary or string to plain text lyrics.
 
     Args:
-        lyrics: The Lyrics instance or dictionary to convert.
+        lyrics: The Lyrics instance or dictionary or string to convert.
         none_char: Character to use for empty lines.
 
     Returns:
@@ -365,6 +533,8 @@ def to_plain_lyrics(lyrics: Union[Lyrics, dict], none_char: str = "♪") -> str:
             synced_lyrics_str = lyrics.get("syncedLyrics")
         else:
             synced_lyrics = lyrics
+    elif isinstance(lyrics, str):
+        synced_lyrics_str = lyrics
 
     result = ""
     if synced_lyrics:
@@ -423,6 +593,21 @@ class LyriqError(Exception):
         self.name = name
         self.message = message
         super().__init__(f"{code} {name}: {message}")
+
+
+class EmptyLyricsError(LyriqError):
+    """
+    Exception raised when trying to convert empty lyrics to a string.
+    """
+
+    def __init__(self, message: str = "Cannot convert empty lyrics to string"):
+        """
+        Initialize a new EmptyLyricsError instance.
+
+        Args:
+            message: The error message.
+        """
+        super().__init__(400, "EmptyLyricsError", message)
 
 
 def _json_get(url: str) -> Dict:

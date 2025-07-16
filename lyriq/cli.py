@@ -5,10 +5,12 @@ This tool allows fetching and displaying lyrics with synchronized playback.
 """
 
 import argparse
+import json
 import os
 import sys
 import threading
 import time
+from json import JSONDecodeError
 from typing import Dict, List, Optional
 
 from . import Lyrics, __version__, get_lyrics, get_lyrics_by_id, search_lyrics
@@ -448,14 +450,19 @@ def main() -> int:
         "--no-info", action="store_true", help="Do not display track information"
     )
     parser.add_argument(
-        "--plain", action="store_true", help="Display only plain lyrics"
+        "--plain",
+        nargs="?",
+        const="plain",
+        default=None,
+        help="Display only plain lyrics (default), or specify 'lrc' or 'json' for other formats",
+        choices=["plain", "lrc", "json"],
     )
     parser.add_argument("--file", default=None, help="File to save lyrics to and exit")
     parser.add_argument(
         "--file-format",
         default="plain",
         help="Format to save lyrics to",
-        choices=["plain", "json"],
+        choices=["plain", "lrc", "json"],
     )
     parser.add_argument(
         "--load",
@@ -509,7 +516,16 @@ def main() -> int:
     elif args.id:
         lyrics = get_lyrics_by_id(args.id, args.none_char)
     elif args.load:
-        lyrics = Lyrics.from_json_file(args.load, args.none_char)
+        if args.load.endswith(".json"):
+            try:
+                lyrics = Lyrics.from_json_file(args.load, args.none_char)
+            except JSONDecodeError:
+                print(
+                    f"{Colors.RED}Error: Invalid JSON file: {args.load}.{Colors.RESET}"
+                )
+                return 1
+        else:
+            lyrics = Lyrics.from_lrc_file(args.load, args.none_char)
     elif not args.song_name and not args.artist_name:
         print(
             f"{Colors.RED}Error: Song name and artist name are required.{Colors.RESET}"
@@ -542,6 +558,8 @@ def main() -> int:
     if args.file:
         if args.file_format == "plain":
             lyrics.to_plain_file(args.file)
+        elif args.file_format == "lrc":
+            lyrics.to_lrc_file(args.file)
         elif args.file_format == "json":
             lyrics.to_json_file(args.file)
         print(
@@ -552,8 +570,16 @@ def main() -> int:
     if not args.no_info:
         display_track_info(lyrics)
 
-    if args.plain:
+    if args.plain == "plain":
         display_plain_lyrics(lyrics.lyrics)
+        return 0
+
+    if args.plain == "lrc":
+        print(lyrics.to_lrc_string())
+        return 0
+
+    if args.plain == "json":
+        print(json.dumps(lyrics.to_dict(), indent=2))
         return 0
 
     has_synced = bool(lyrics.synced_lyrics and lyrics.synced_lyrics.strip())

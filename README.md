@@ -126,8 +126,10 @@ loaded_lyrics = lyrics.from_json_file("circles.json")
 
 The library comes with a command-line interface for quick access to lyrics with synchronized lyrics playback:
 ```
-usage: lyriq [-h] [-v] [--id ID] [--duration [DURATION]] [--search [SEARCH]] [--search-index SEARCH_INDEX]
-             [--none-char NONE_CHAR] [--no-info] [--plain] [--file FILE] [--file-format {plain,json}] [--load LOAD]
+usage: lyriq [-h] [-v] [--id ID] [--duration [DURATION]] [--search [SEARCH]]
+             [--search-index SEARCH_INDEX] [--none-char NONE_CHAR] [--no-info]
+             [--plain [{plain,lrc,json}]] [--file FILE] [--file-format {plain,lrc,json}]
+             [--load LOAD]
              [song_name] [artist_name] [album_name]
 
 Fetch and display song lyrics
@@ -149,9 +151,10 @@ options:
   --none-char NONE_CHAR
                         Character to use for empty lines
   --no-info             Do not display track information
-  --plain               Display only plain lyrics
+  --plain [{plain,lrc,json}]
+                        Display only plain lyrics (default), or specify 'lrc' or 'json' for other formats
   --file FILE           File to save lyrics to and exit
-  --file-format {plain,json}
+  --file-format {plain,lrc,json}
                         Format to save lyrics to
   --load LOAD           Load lyrics from file
 ```
@@ -180,14 +183,22 @@ lyriq "Circles" "Post Malone" --no-info
 # Display only plain lyrics
 lyriq "Circles" "Post Malone" --plain
 
+# Display plain lyrics in other formats
+lyriq "Circles" "Post Malone" --plain lrc
+lyriq "Circles" "Post Malone" --plain json
+
 # Save lyrics to file and exit
 lyriq "Circles" "Post Malone" --file Circles-Post-Malone.txt
 
 # Save lyrics to JSON file and exit
 lyriq "Circles" "Post Malone" --file Circles-Post-Malone.json --file-format json
 
+# Save lyrics to LRC file and exit
+lyriq "Circles" "Post Malone" --file Circles-Post-Malone.json --file-format lrc
+
 # Load lyrics from file
 lyriq --load Circles-Post-Malone.json
+lyriq --load Circles-Post-Malone.lrc
 
 # Search for lyrics using song name and artist name fields with interactive UI
 lyriq "Circles" "Post Malone" --search
@@ -332,12 +343,54 @@ Convert the `Lyrics` instance to a dictionary.
 
 - **Returns**: Dictionary representation of the lyrics
 
-##### `to_plain_file(file_path)`
+##### `to_plain_string(none_char=None)`
+
+Convert the lyrics to a plain string representation.
+
+- **Parameters**:
+    - `none_char`: Character to use for empty lines (optional)
+- **Returns**: Plain string representation of lyrics or None if empty
+- **Raises**: `EmptyLyricsError` if lyrics are empty
+
+##### `to_plain_file(file_path, none_char=None)`
 
 Write the lyrics to a plain text file.
 
 - **Parameters**:
     - `file_path`: Path to the output file
+    - `none_char`: Character to use for empty lines (optional)
+- **Raises**: `EmptyLyricsError` if lyrics are empty
+
+##### `to_lrc_string()`
+
+Convert the lyrics to LRC format string.
+
+- **Returns**: LRC format string with metadata and timestamps
+
+##### `to_lrc_file(file_path)`
+
+Write the lyrics to a LRC file.
+
+- **Parameters**:
+    - `file_path`: Path to the output file
+
+##### `from_lrc_string(lrc_string, none_char="♪")`
+
+Create a `Lyrics` instance from a LRC format string.
+
+- **Parameters**:
+    - `lrc_string`: LRC format string with metadata and timestamps
+    - `none_char`: Character to use for empty lines
+- **Returns**: A new `Lyrics` instance
+
+##### `from_lrc_file(file_path, none_char="♪")`
+
+Read lyrics from a LRC file.
+
+- **Parameters**:
+    - `file_path`: Path to the LRC file
+    - `none_char`: Character to use for empty lines
+- **Returns**: A new `Lyrics` instance
 
 ##### `to_json_file(file_path)`
 
