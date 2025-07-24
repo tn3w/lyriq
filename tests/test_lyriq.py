@@ -33,6 +33,11 @@ from lyriq.lyriq import (
     generate_publish_token,
     publish_lyrics,
     EmptyLyricsError,
+    DatabaseDump,
+    get_database_dumps,
+    get_latest_database_dump,
+    download_database_dump,
+    DB_DUMPS_URL,
 )
 
 
@@ -422,7 +427,7 @@ class TestJsonGet:
         args, _ = mock_urlopen.call_args
         request = args[0]
         assert "Lyriq v" in request.get_header("User-agent")
-        assert "github.com/TN3W/lyriq" in request.get_header("User-agent")
+        assert "github.com/tn3w/lyriq" in request.get_header("User-agent")
 
 
 class TestLyricsCache:
@@ -1154,6 +1159,463 @@ class TestPublishLyrics:
         assert excinfo.value.code == 400
         assert excinfo.value.name == "IncorrectPublishTokenError"
         assert "incorrect" in excinfo.value.message
+
+
+@pytest.fixture
+def sample_database_dump_data():
+    """
+    Sample database dump data for testing.
+
+    Returns:
+        Dictionary containing sample database dump data.
+    """
+    return {
+        "storageClass": "Standard",
+        "uploaded": "2025-07-18T08:26:49.465Z",
+        "checksums": {},
+        "httpEtag": '"7b864e9f454f08cd331cd117855d509f-1008"',
+        "etag": "7b864e9f454f08cd331cd117855d509f-1008",
+        "size": 16904195389,
+        "version": "7e67e3674918e8cf5fe3f2c713a81b42",
+        "key": "lrclib-db-dump-20250718T081344Z.sqlite3.gz",
+    }
+
+
+@pytest.fixture
+def sample_database_dump_object(sample_database_dump_data):
+    """
+    Create a sample DatabaseDump object for testing.
+
+    Args:
+        sample_database_dump_data: The sample database dump data from the fixture.
+
+    Returns:
+        A DatabaseDump object created from the sample data.
+    """
+    return DatabaseDump.from_dict(sample_database_dump_data)
+
+
+class TestDatabaseDumpClass:
+    """Tests for the DatabaseDump class."""
+
+    def test_from_dict(self, sample_database_dump_data):
+        """Test creating a DatabaseDump object from a dictionary."""
+        dump = DatabaseDump.from_dict(sample_database_dump_data)
+
+        assert dump.storage_class == "Standard"
+        assert dump.size == 16904195389
+        assert dump.version == "7e67e3674918e8cf5fe3f2c713a81b42"
+        assert dump.key == "lrclib-db-dump-20250718T081344Z.sqlite3.gz"
+        assert dump.http_etag == '"7b864e9f454f08cd331cd117855d509f-1008"'
+        assert dump.etag == "7b864e9f454f08cd331cd117855d509f-1008"
+        assert dump.checksums == {}
+
+        assert dump.uploaded.year == 2025
+        assert dump.uploaded.month == 7
+        assert dump.uploaded.day == 18
+
+    def test_filename_property(self, sample_database_dump_object):
+        """Test the filename property."""
+        assert (
+            sample_database_dump_object.filename
+            == "lrclib-db-dump-20250718T081344Z.sqlite3.gz"
+        )
+
+    def test_filename_property_with_path(self):
+        """Test the filename property with a path in the key."""
+        data = {
+            "storageClass": "Standard",
+            "uploaded": "2025-07-18T08:26:49.465Z",
+            "checksums": {},
+            "httpEtag": '"test"',
+            "etag": "test",
+            "size": 1000,
+            "version": "test",
+            "key": "path/to/file.sqlite3.gz",
+        }
+        dump = DatabaseDump.from_dict(data)
+        assert dump.filename == "file.sqlite3.gz"
+
+    def test_download_url_property(self, sample_database_dump_object):
+        """Test the download_url property."""
+        expected_url = (
+            "https://db-dumps.lrclib.net/lrclib-db-dump-20250718T081344Z.sqlite3.gz"
+        )
+        assert sample_database_dump_object.download_url == expected_url
+
+    def test_from_dict_with_missing_fields(self):
+        """Test creating a DatabaseDump object with missing fields."""
+        minimal_data = {
+            "uploaded": "2025-07-18T08:26:49.465Z",
+            "key": "test.sqlite3.gz",
+        }
+
+        dump = DatabaseDump.from_dict(minimal_data)
+
+        assert dump.storage_class == ""
+        assert dump.size == 0
+        assert dump.version == ""
+        assert dump.key == "test.sqlite3.gz"
+        assert dump.checksums == {}
+
+
+class TestGetDatabaseDumps:
+    """Tests for the get_database_dumps function."""
+
+    @mock.patch("lyriq.lyriq.db_dumps_cache")
+    @mock.patch("lyriq.lyriq._json_get")
+    def test_get_database_dumps_success(self, mock_json_get, mock_cache):
+        """Test successful database dumps retrieval."""
+        mock_cache.get.return_value = None
+
+        sample_response = {
+            "objects": [
+                {
+                    "storageClass": "Standard",
+                    "uploaded": "2025-07-18T08:26:49.465Z",
+                    "checksums": {},
+                    "httpEtag": '"test1"',
+                    "etag": "test1",
+                    "size": 1000,
+                    "version": "version1",
+                    "key": "dump1.sqlite3.gz",
+                },
+                {
+                    "storageClass": "Standard",
+                    "uploaded": "2025-07-17T08:26:49.465Z",
+                    "checksums": {},
+                    "httpEtag": '"test2"',
+                    "etag": "test2",
+                    "size": 2000,
+                    "version": "version2",
+                    "key": "dump2.sqlite3.gz",
+                },
+            ],
+            "truncated": False,
+            "delimitedPrefixes": [],
+        }
+        mock_json_get.return_value = sample_response
+
+        dumps = get_database_dumps()
+
+        assert dumps is not None
+        assert len(dumps) == 2
+        assert dumps[0].key == "dump1.sqlite3.gz"
+        assert dumps[0].size == 1000
+        assert dumps[1].key == "dump2.sqlite3.gz"
+        assert dumps[1].size == 2000
+
+        mock_json_get.assert_called_once_with(DB_DUMPS_URL)
+        mock_cache.set.assert_called_once()
+
+    @mock.patch("lyriq.lyriq.db_dumps_cache")
+    @mock.patch("lyriq.lyriq.datetime")
+    def test_get_database_dumps_from_cache(self, mock_datetime, mock_cache):
+        """Test retrieving database dumps from cache."""
+        mock_datetime.now.return_value.timestamp.return_value = 1000
+
+        cached_data = {
+            "timestamp": 500,
+            "objects": [
+                {
+                    "storageClass": "Standard",
+                    "uploaded": "2025-07-18T08:26:49.465Z",
+                    "checksums": {},
+                    "httpEtag": '"cached"',
+                    "etag": "cached",
+                    "size": 5000,
+                    "version": "cached_version",
+                    "key": "cached_dump.sqlite3.gz",
+                }
+            ],
+            "truncated": False,
+            "delimitedPrefixes": [],
+        }
+        mock_cache.get.return_value = cached_data
+
+        dumps = get_database_dumps()
+
+        assert dumps is not None
+        assert len(dumps) == 1
+        assert dumps[0].key == "cached_dump.sqlite3.gz"
+        assert dumps[0].size == 5000
+
+    @mock.patch("lyriq.lyriq.db_dumps_cache")
+    @mock.patch("lyriq.lyriq.datetime")
+    def test_get_database_dumps_expired_cache(self, mock_datetime, mock_cache):
+        """Test handling of expired cache."""
+        mock_datetime.now.return_value.timestamp.return_value = 5000
+
+        cached_data = {"timestamp": 500, "objects": [{"key": "old_dump.sqlite3.gz"}]}
+        mock_cache.get.return_value = cached_data
+
+        with mock.patch("lyriq.lyriq._json_get") as mock_json_get:
+            mock_json_get.return_value = {
+                "objects": [],
+                "truncated": False,
+                "delimitedPrefixes": [],
+            }
+
+            dumps = get_database_dumps()
+
+            mock_json_get.assert_called_once()
+
+    @mock.patch("lyriq.lyriq.db_dumps_cache")
+    @mock.patch("lyriq.lyriq._json_get")
+    def test_get_database_dumps_api_error(self, mock_json_get, mock_cache):
+        """Test handling of API error."""
+        mock_cache.get.return_value = None
+        mock_json_get.side_effect = LyriqError(
+            500, "Server Error", "Internal server error"
+        )
+
+        dumps = get_database_dumps()
+
+        assert dumps is None
+        mock_json_get.assert_called_once()
+
+    @mock.patch("lyriq.lyriq.db_dumps_cache")
+    @mock.patch("lyriq.lyriq._json_get")
+    def test_get_database_dumps_general_exception(self, mock_json_get, mock_cache):
+        """Test handling of general exception."""
+        mock_cache.get.return_value = None
+        mock_json_get.side_effect = Exception("Network error")
+
+        dumps = get_database_dumps()
+
+        assert dumps is None
+        mock_json_get.assert_called_once()
+
+
+class TestGetLatestDatabaseDump:
+    """Tests for the get_latest_database_dump function."""
+
+    @mock.patch("lyriq.lyriq.get_database_dumps")
+    def test_get_latest_database_dump_success(self, mock_get_dumps):
+        """Test getting the latest database dump."""
+        dumps_data = [
+            {
+                "storageClass": "Standard",
+                "uploaded": "2025-07-17T08:26:49.465Z",
+                "checksums": {},
+                "httpEtag": '"older"',
+                "etag": "older",
+                "size": 1000,
+                "version": "older_version",
+                "key": "older_dump.sqlite3.gz",
+            },
+            {
+                "storageClass": "Standard",
+                "uploaded": "2025-07-18T08:26:49.465Z",
+                "checksums": {},
+                "httpEtag": '"newer"',
+                "etag": "newer",
+                "size": 2000,
+                "version": "newer_version",
+                "key": "newer_dump.sqlite3.gz",
+            },
+        ]
+
+        dumps = [DatabaseDump.from_dict(data) for data in dumps_data]
+        mock_get_dumps.return_value = dumps
+
+        latest = get_latest_database_dump()
+
+        assert latest is not None
+        assert latest.key == "newer_dump.sqlite3.gz"
+        assert latest.size == 2000
+        mock_get_dumps.assert_called_once()
+
+    @mock.patch("lyriq.lyriq.get_database_dumps")
+    def test_get_latest_database_dump_no_dumps(self, mock_get_dumps):
+        """Test handling when no dumps are available."""
+        mock_get_dumps.return_value = None
+
+        latest = get_latest_database_dump()
+
+        assert latest is None
+        mock_get_dumps.assert_called_once()
+
+    @mock.patch("lyriq.lyriq.get_database_dumps")
+    def test_get_latest_database_dump_empty_list(self, mock_get_dumps):
+        """Test handling when dumps list is empty."""
+        mock_get_dumps.return_value = []
+
+        latest = get_latest_database_dump()
+
+        assert latest is None
+        mock_get_dumps.assert_called_once()
+
+
+class TestDownloadDatabaseDump:
+    """Tests for the download_database_dump function."""
+
+    def test_download_database_dump_success(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test successful database dump download."""
+        test_content = b"Test database dump content"
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = mock.MagicMock()
+            mock_response.headers.get.return_value = str(len(test_content))
+            mock_response.read.side_effect = [test_content, b""]
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result_path = download_database_dump(
+                sample_database_dump_object, temp_output_file
+            )
+
+            assert result_path == temp_output_file
+            assert os.path.exists(temp_output_file)
+
+            with open(temp_output_file, "rb") as f:
+                content = f.read()
+                assert content == test_content
+
+            mock_urlopen.assert_called_once()
+            args, _ = mock_urlopen.call_args
+            request = args[0]
+            assert sample_database_dump_object.download_url in request.full_url
+            assert "Lyriq v" in request.get_header("User-agent")
+
+    def test_download_database_dump_with_progress_callback(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test database dump download with progress callback."""
+        test_content = b"Test content for progress tracking"
+        progress_calls = []
+
+        def progress_callback(downloaded, total):
+            progress_calls.append((downloaded, total))
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = mock.MagicMock()
+            mock_response.headers.get.return_value = str(len(test_content))
+            chunk_size = 8
+            chunks = [
+                test_content[i : i + chunk_size]
+                for i in range(0, len(test_content), chunk_size)
+            ]
+            chunks.append(b"")
+            mock_response.read.side_effect = chunks
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result_path = download_database_dump(
+                sample_database_dump_object,
+                temp_output_file,
+                progress_callback=progress_callback,
+            )
+
+            assert result_path == temp_output_file
+            assert len(progress_calls) > 0
+
+            total_downloaded = sum(call[0] for call in progress_calls if call[0] > 0)
+            assert total_downloaded >= len(test_content)
+
+    def test_download_database_dump_default_path(self, sample_database_dump_object):
+        """Test database dump download with default path."""
+        test_content = b"Test content"
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = mock.MagicMock()
+            mock_response.headers.get.return_value = str(len(test_content))
+            mock_response.read.side_effect = [test_content, b""]
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            with mock.patch("os.makedirs") as mock_makedirs:
+                with mock.patch("builtins.open", mock.mock_open()) as mock_file:
+                    result_path = download_database_dump(sample_database_dump_object)
+
+                    assert result_path is not None
+                    assert sample_database_dump_object.filename in result_path
+                    mock_makedirs.assert_called_once()
+                    mock_file.assert_called_once()
+
+    def test_download_database_dump_http_error(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test handling of HTTP error during download."""
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"statusCode": 404, "name": "NotFound", "message": "File not found"}
+        ).encode("utf-8")
+
+        headers = email.message.Message()
+        headers["Content-Type"] = "application/json"
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.HTTPError(
+                "https://example.com", 404, "Not Found", headers, mock_response
+            )
+
+            with pytest.raises(LyriqError) as excinfo:
+                download_database_dump(sample_database_dump_object, temp_output_file)
+
+            assert excinfo.value.code == 404
+            assert excinfo.value.name == "NotFound"
+            assert "File not found" in excinfo.value.message
+
+    def test_download_database_dump_http_error_no_json(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test handling of HTTP error with non-JSON response."""
+        mock_response = mock.MagicMock()
+        mock_response.read.return_value = b"Plain text error"
+
+        headers = email.message.Message()
+        headers["Content-Type"] = "text/plain"
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.HTTPError(
+                "https://example.com", 500, "Server Error", headers, mock_response
+            )
+
+            result = download_database_dump(
+                sample_database_dump_object, temp_output_file
+            )
+
+            assert result is None
+
+    def test_download_database_dump_general_exception(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test handling of general exception during download."""
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = Exception("Network error")
+
+            result = download_database_dump(
+                sample_database_dump_object, temp_output_file
+            )
+
+            assert result is None
+
+    def test_download_database_dump_no_content_length(
+        self, sample_database_dump_object, temp_output_file
+    ):
+        """Test download when Content-Length header is missing."""
+        test_content = b"Test content without content length"
+        progress_calls = []
+
+        def progress_callback(downloaded, total):
+            progress_calls.append((downloaded, total))
+
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = mock.MagicMock()
+            mock_response.headers.get.return_value = None
+            mock_response.read.side_effect = [test_content, b""]
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result_path = download_database_dump(
+                sample_database_dump_object,
+                temp_output_file,
+                progress_callback=progress_callback,
+            )
+
+            assert result_path == temp_output_file
+
+            assert len(progress_calls) > 0
+            assert all(call[1] == 0 for call in progress_calls)
 
 
 if __name__ == "__main__":

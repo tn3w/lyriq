@@ -10,7 +10,7 @@ Basic usage:
     >>> print(lyrics.plain_lyrics)
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __author__ = "TN3W"
 __license__ = "Apache-2.0"
 __email__ = "tn3w@protonmail.com"
@@ -18,6 +18,7 @@ __url__ = "https://github.com/tn3w/lyriq"
 
 from .lyriq import (
     Lyrics,
+    DatabaseDump,
     LyriqError,
     get_lyrics,
     get_lyrics_by_id,
@@ -27,10 +28,14 @@ from .lyriq import (
     verify_nonce,
     generate_publish_token,
     publish_lyrics,
+    get_database_dumps,
+    get_latest_database_dump,
+    download_database_dump,
 )
 
 __all__ = [
     "Lyrics",
+    "DatabaseDump",
     "LyriqError",
     "get_lyrics",
     "get_lyrics_by_id",
@@ -40,4 +45,7 @@ __all__ = [
     "verify_nonce",
     "generate_publish_token",
     "publish_lyrics",
+    "get_database_dumps",
+    "get_latest_database_dump",
+    "download_database_dump",
 ]

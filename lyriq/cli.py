@@ -13,7 +13,16 @@ import time
 from json import JSONDecodeError
 from typing import Dict, List, Optional
 
-from . import Lyrics, __version__, get_lyrics, get_lyrics_by_id, search_lyrics
+from . import (
+    Lyrics,
+    DatabaseDump,
+    __version__,
+    get_lyrics,
+    get_lyrics_by_id,
+    search_lyrics,
+    get_database_dumps,
+    download_database_dump,
+)
 
 try:
     import tty
@@ -303,6 +312,233 @@ def display_plain_lyrics(lyrics: Dict[str, str]) -> None:
         print(f"{text}")
 
 
+def format_file_size(size_bytes: int) -> str:
+    """
+    Format file size in human readable format.
+
+    Args:
+        size_bytes: Size in bytes
+
+    Returns:
+        Formatted size string
+    """
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} PB"
+
+
+def display_database_dumps(dumps: List[DatabaseDump]) -> Optional[DatabaseDump]:
+    """
+    Display database dumps in an interactive UI with arrow key navigation.
+
+    Args:
+        dumps: List of DatabaseDump objects
+
+    Returns:
+        Selected DatabaseDump object or None if canceled
+    """
+    if not dumps or len(dumps) == 0:
+        print(f"{Colors.RED}No database dumps found.{Colors.RESET}")
+        return None
+
+    selected_idx = 0
+    start_idx = 0
+    page_size = 5
+    max_idx = len(dumps) - 1
+
+    while True:
+        clear_screen()
+        print(f"{Colors.BOLD}Available Database Dumps:{Colors.RESET}")
+        print(
+            f"Found {len(dumps)} dumps. Use {Colors.YELLOW}↑/↓{Colors.RESET}"
+            f" arrows to navigate, {Colors.YELLOW}'Enter'{Colors.RESET} to download, "
+            f"or {Colors.YELLOW}'1-9'{Colors.RESET} to choose directly."
+        )
+        print(f"Press {Colors.YELLOW}'q'{Colors.RESET} to quit.\n")
+
+        if selected_idx >= start_idx + page_size:
+            start_idx = min(selected_idx - page_size + 1, max_idx - page_size + 1)
+        elif selected_idx < start_idx:
+            start_idx = max(0, selected_idx)
+
+        if start_idx > 0:
+            print(f"{Colors.BRIGHT_BLACK}   ↑ more dumps above ↑{Colors.RESET}")
+
+        end_idx = min(start_idx + page_size, len(dumps))
+
+        for i in range(start_idx, end_idx):
+            dump = dumps[i]
+
+            size_str = format_file_size(dump.size)
+            date_str = dump.uploaded.strftime("%Y-%m-%d %H:%M UTC")
+
+            if i == selected_idx:
+                selector = (
+                    f"{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}[{i+1}]{Colors.RESET} "
+                )
+            else:
+                selector = f"{Colors.BRIGHT_CYAN}[{i+1}]{Colors.RESET} "
+
+            print(f"{selector}{dump.filename}")
+            print(f"     Size: {size_str} | Uploaded: {date_str}")
+            if i < end_idx - 1:
+                print()
+
+        if end_idx < len(dumps):
+            print(f"\n{Colors.BRIGHT_BLACK}   ↓ more dumps below ↓{Colors.RESET}")
+
+        key = get_keypress()
+
+        if key == "q":
+            return None
+        if key in ("\r", "\n"):
+            return dumps[selected_idx]
+        if key in "123456789":
+            idx = int(key) - 1
+            if 0 <= idx < len(dumps):
+                return dumps[idx]
+        if key == "\x1b":
+            next_char = get_keypress()
+            if next_char == "[":
+                arrow = get_keypress()
+                if arrow == "A":
+                    selected_idx = max(0, selected_idx - 1)
+                elif arrow == "B":
+                    selected_idx = min(max_idx, selected_idx + 1)
+
+
+def download_dump_with_progress(
+    dump: DatabaseDump, download_path: Optional[str] = None
+) -> bool:
+    """
+    Download a database dump with progress display.
+
+    Args:
+        dump: DatabaseDump object to download
+        download_path: Optional custom download path
+
+    Returns:
+        True if download successful, False otherwise
+    """
+    print(f"\n{Colors.BOLD}Downloading {dump.filename}...{Colors.RESET}")
+    print(f"Size: {format_file_size(dump.size)}")
+    print(f"URL: {dump.download_url}")
+
+    if download_path:
+        print(f"Destination: {download_path}")
+    else:
+        print("Destination: Cache directory")
+
+    print(f"\n{Colors.YELLOW}Press Ctrl+C to cancel download{Colors.RESET}\n")
+
+    progress_bar_width = 50
+    last_progress = 0
+
+    def progress_callback(downloaded: int, total: int):
+        nonlocal last_progress
+
+        if total > 0:
+            percent = (downloaded / total) * 100
+            filled_width = int((downloaded / total) * progress_bar_width)
+        else:
+            percent = 0
+            filled_width = 0
+
+        if int(percent) > last_progress:
+            status_bar = "█" * filled_width + "░" * (progress_bar_width - filled_width)
+            downloaded_str = format_file_size(downloaded)
+            total_str = format_file_size(total) if total > 0 else "Unknown"
+
+            print(
+                f"\r{Colors.GREEN}[{status_bar}]{Colors.RESET}"
+                f" {percent:5.1f}% ({downloaded_str}/{total_str})",
+                end="",
+                flush=True,
+            )
+            last_progress = int(percent)
+
+    try:
+        result_path = download_database_dump(dump, download_path, progress_callback)
+
+        if result_path:
+            print(f"\n\n{Colors.GREEN}✓ Download completed successfully!{Colors.RESET}")
+            print(f"File saved to: {result_path}")
+            return True
+        else:
+            print(f"\n\n{Colors.RED}✗ Download failed.{Colors.RESET}")
+            return False
+
+    except KeyboardInterrupt:
+        print(f"\n\n{Colors.YELLOW}Download canceled by user.{Colors.RESET}")
+        return False
+    except Exception as e:
+        print(f"\n\n{Colors.RED}✗ Download failed: {e}{Colors.RESET}")
+        return False
+
+
+def handle_database_dumps(dumps_index: Optional[int] = None) -> int:
+    """
+    Handle the database dumps CLI functionality.
+
+    Args:
+        dumps_index: Optional index to select dump directly (1-based)
+
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    print(f"{Colors.BOLD}Fetching database dumps...{Colors.RESET}")
+
+    dumps = get_database_dumps()
+    if not dumps:
+        print(
+            f"{Colors.RED}Failed to fetch database dumps or no dumps available.{Colors.RESET}"
+        )
+        return 1
+
+    dumps.sort(key=lambda x: x.uploaded, reverse=True)
+
+    if dumps_index is not None:
+        if 1 <= dumps_index <= len(dumps):
+            selected_dump = dumps[dumps_index - 1]
+            print(
+                f"{Colors.BOLD}Selected dump by index:{Colors.RESET} {selected_dump.filename}"
+            )
+        else:
+            print(
+                f"{Colors.RED}Error: Dump index {dumps_index}"
+                f" out of range (1-{len(dumps)}).{Colors.RESET}"
+            )
+            return 1
+    else:
+        selected_dump = display_database_dumps(dumps)
+        if not selected_dump:
+            print("No dump selected.")
+            return 0
+
+    print(f"Size: {format_file_size(selected_dump.size)}")
+    print(f"Uploaded: {selected_dump.uploaded.strftime('%Y-%m-%d %H:%M UTC')}")
+
+    while not dumps_index:
+        response = input("\nDownload this dump? (y/N): ").strip().lower()
+        if response in ["y", "yes"]:
+            break
+        elif response in ["n", "no", ""]:
+            print("Download canceled.")
+            return 0
+        else:
+            print("Please enter 'y' for yes or 'n' for no.")
+
+    custom_path = None
+    if not dumps_index:
+        custom_path = input("Custom download path (press Enter for default): ").strip()
+    download_path = custom_path if custom_path else None
+
+    success = download_dump_with_progress(selected_dump, download_path)
+    return 0 if success else 1
+
+
 def display_search_results(
     results: List[Lyrics], search_query: str
 ) -> Optional[Lyrics]:
@@ -469,8 +705,22 @@ def main() -> int:
         default=None,
         help="Load lyrics from file",
     )
+    parser.add_argument(
+        "--dumps",
+        action="store_true",
+        help="List and download database dumps",
+    )
+    parser.add_argument(
+        "--dumps-index",
+        type=int,
+        default=None,
+        help="Select database dump at specified index directly (1-based)",
+    )
 
     args = parser.parse_args()
+
+    if args.dumps:
+        return handle_database_dumps(args.dumps_index)
 
     if args.search is not False:
         search_query = None

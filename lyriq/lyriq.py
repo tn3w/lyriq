@@ -8,7 +8,6 @@ from the LRCLib API with caching support.
 import json
 import logging
 import os
-from pydoc import plain
 import threading
 import urllib.parse
 import urllib.request
@@ -16,8 +15,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Tuple
 from urllib.error import HTTPError
 import hashlib
+from datetime import datetime
 
-from . import __version__
+from . import __version__, __url__
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +27,8 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 LYRICS_CACHE_PATH = os.path.join(CACHE_DIR, "lyrics.json")
 SEARCH_CACHE_PATH = os.path.join(CACHE_DIR, "search.json")
+DB_DUMPS_CACHE_PATH = os.path.join(CACHE_DIR, "db_dumps.json")
+DB_DUMPS_URL = "https://lrclib-db-dumps.bu3nnyut4y9jfkdg.workers.dev"
 
 
 class _Cache:
@@ -155,6 +157,7 @@ class _LyricsCache(_Cache):
 
 lyrics_cache = _LyricsCache(LYRICS_CACHE_PATH)
 search_cache = _Cache(SEARCH_CACHE_PATH)
+db_dumps_cache = _Cache(DB_DUMPS_CACHE_PATH)
 
 
 def _process_lyrics(data: Dict, none_char: str = "♪") -> Dict[str, str]:
@@ -207,6 +210,58 @@ def _process_lyrics(data: Dict, none_char: str = "♪") -> Dict[str, str]:
                 result[timestamp] = none_char
 
     return result
+
+
+@dataclass
+class DatabaseDump:
+    """
+    Database dump information from the LRCLib database dumps API.
+
+    Contains metadata about available database dump files.
+    """
+
+    storage_class: str
+    uploaded: datetime
+    checksums: Dict
+    http_etag: str
+    etag: str
+    size: int
+    version: str
+    key: str
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "DatabaseDump":
+        """
+        Create a DatabaseDump instance from a dictionary.
+
+        Args:
+            data: The raw database dump data dictionary.
+
+        Returns:
+            A new DatabaseDump instance.
+        """
+        return cls(
+            storage_class=data.get("storageClass", ""),
+            uploaded=datetime.fromisoformat(
+                data.get("uploaded", "").replace("Z", "+00:00")
+            ),
+            checksums=data.get("checksums", {}),
+            http_etag=data.get("httpEtag", ""),
+            etag=data.get("etag", ""),
+            size=data.get("size", 0),
+            version=data.get("version", ""),
+            key=data.get("key", ""),
+        )
+
+    @property
+    def filename(self) -> str:
+        """Get the filename from the key."""
+        return self.key.split("/")[-1] if "/" in self.key else self.key
+
+    @property
+    def download_url(self) -> str:
+        """Get the download URL for this dump."""
+        return f"https://db-dumps.lrclib.net/{self.filename}"
 
 
 @dataclass
@@ -626,7 +681,7 @@ def _json_get(url: str) -> Dict:
     """
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": f"Lyriq v{__version__} (https://github.com/TN3W/lyriq)"},
+        headers={"User-Agent": f"Lyriq v{__version__} ({__url__})"},
     )
     try:
         with urllib.request.urlopen(req) as response:
@@ -813,7 +868,7 @@ def request_challenge() -> Tuple[str, str]:
     """
     url = f"{API_URL}/request-challenge"
     headers = {
-        "User-Agent": f"Lyriq v{__version__} (https://github.com/TN3W/lyriq)",
+        "User-Agent": f"Lyriq v{__version__} ({__url__})",
         "Content-Type": "application/json",
     }
 
@@ -927,7 +982,7 @@ def publish_lyrics(
     }
 
     headers = {
-        "User-Agent": f"Lyriq v{__version__} (https://github.com/TN3W/lyriq)",
+        "User-Agent": f"Lyriq v{__version__} ({__url__})",
         "Content-Type": "application/json",
         "X-Publish-Token": publish_token,
     }
@@ -971,3 +1026,131 @@ def publish_lyrics(
             ) from e
         except json.JSONDecodeError as exc:
             raise exc from e
+
+
+def get_database_dumps() -> Optional[List[DatabaseDump]]:
+    """
+    Get the list of available database dumps from the LRCLib database dumps API.
+
+    This function caches the results to avoid redundant API calls.
+
+    Returns:
+        A list of DatabaseDump objects if successful, None otherwise.
+
+    Raises:
+        LyriqError: If there is an error fetching the database dumps.
+    """
+    cache_key = "database_dumps"
+    cached_data = db_dumps_cache.get(cache_key)
+
+    if cached_data and isinstance(cached_data, dict):
+        cache_time = cached_data.get("timestamp", 0)
+        current_time = datetime.now().timestamp()
+        if current_time - cache_time < 3600:
+            objects = cached_data.get("objects", [])
+            return [DatabaseDump.from_dict(obj) for obj in objects]
+
+    try:
+        data = _json_get(DB_DUMPS_URL)
+
+        cache_data = {
+            "timestamp": datetime.now().timestamp(),
+            "objects": data.get("objects", []),
+            "truncated": data.get("truncated", False),
+            "delimitedPrefixes": data.get("delimitedPrefixes", []),
+        }
+        db_dumps_cache.set(cache_key, cache_data)
+
+        objects = data.get("objects", [])
+        return [DatabaseDump.from_dict(obj) for obj in objects]
+
+    except LyriqError as e:
+        logger.error("Error getting database dumps: %s", e)
+        return None
+    except Exception as e:
+        logger.error("Error getting database dumps: %s", e)
+        return None
+
+
+def get_latest_database_dump() -> Optional[DatabaseDump]:
+    """
+    Get the latest database dump from the LRCLib database dumps API.
+
+    Returns:
+        The latest DatabaseDump object if found, None otherwise.
+    """
+    dumps = get_database_dumps()
+    if not dumps:
+        return None
+
+    dumps.sort(key=lambda x: x.uploaded, reverse=True)
+    return dumps[0]
+
+
+def download_database_dump(
+    dump: DatabaseDump,
+    download_path: Optional[str] = None,
+    progress_callback: Optional[callable] = None,
+) -> Optional[str]:
+    """
+    Download a database dump file.
+
+    Args:
+        dump: The DatabaseDump object to download.
+        download_path: Optional path to save the file. If not provided, saves to cache directory.
+        progress_callback: Optional callback function to track download progress.
+                          Called with (bytes_downloaded, total_bytes).
+
+    Returns:
+        The path to the downloaded file if successful, None otherwise.
+
+    Raises:
+        LyriqError: If there is an error downloading the file.
+    """
+    if not download_path:
+        download_path = os.path.join(CACHE_DIR, dump.filename)
+
+    os.makedirs(os.path.dirname(download_path), exist_ok=True)
+
+    try:
+        req = urllib.request.Request(
+            dump.download_url,
+            headers={
+                "User-Agent": f"Lyriq v{__version__} ({__url__})"
+            },
+        )
+
+        with urllib.request.urlopen(req) as response:
+            total_size = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+
+            with open(download_path, "wb") as f:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    if progress_callback:
+                        progress_callback(downloaded, total_size)
+
+        logger.info("Successfully downloaded database dump to %s", download_path)
+        return download_path
+
+    except HTTPError as e:
+        error_data = e.read().decode("utf-8")
+        try:
+            error_json = json.loads(error_data)
+            raise LyriqError(
+                error_json.get("statusCode", e.code),
+                error_json.get("name", "Unknown error"),
+                error_json.get("message", "Unknown error"),
+            ) from e
+        except json.JSONDecodeError:
+            logger.error("Error downloading database dump: HTTP %s", e.code)
+            return None
+    except Exception as e:
+        logger.error("Error downloading database dump: %s", e)
+        return None

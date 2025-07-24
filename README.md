@@ -14,6 +14,8 @@ A lightweight Python library designed to effortlessly fetch and display song lyr
 - CLI tool with synchronized lyrics playback
 - Support for saving/loading lyrics in JSON and plain text formats
 - Colorful terminal output with synchronized highlighting
+- Database dump management with download functionality
+- Progress tracking for large file downloads
 
 ## Installation
 
@@ -122,6 +124,42 @@ lyrics.to_json_file("circles.json")
 loaded_lyrics = lyrics.from_json_file("circles.json")
 ```
 
+### Database Dumps
+
+```python
+from lyriq import get_database_dumps, get_latest_database_dump, download_database_dump
+
+# Get all available database dumps
+dumps = get_database_dumps()
+if dumps:
+    print(f"Found {len(dumps)} database dumps:")
+    for i, dump in enumerate(dumps, 1):
+        size_mb = dump.size / (1024 * 1024)
+        print(f"{i}. {dump.filename} ({size_mb:.1f} MB)")
+
+# Get the latest database dump
+latest_dump = get_latest_database_dump()
+if latest_dump:
+    print(f"Latest dump: {latest_dump.filename}")
+    print(f"Size: {latest_dump.size / (1024 * 1024):.1f} MB")
+    print(f"Uploaded: {latest_dump.uploaded}")
+
+# Download a database dump with progress tracking
+def progress_callback(downloaded, total):
+    if total > 0:
+        percent = (downloaded / total) * 100
+        print(f"Progress: {percent:.1f}%")
+
+if latest_dump:
+    file_path = download_database_dump(
+        latest_dump, 
+        download_path="./my_dump.sqlite3.gz",
+        progress_callback=progress_callback
+    )
+    if file_path:
+        print(f"Downloaded to: {file_path}")
+```
+
 ## Command Line Interface
 
 The library comes with a command-line interface for quick access to lyrics with synchronized lyrics playback:
@@ -157,6 +195,9 @@ options:
   --file-format {plain,lrc,json}
                         Format to save lyrics to
   --load LOAD           Load lyrics from file
+  --dumps               List and download database dumps
+  --dumps-index DUMPS_INDEX
+                        Select database dump at specified index directly (1-based)
 ```
 
 ### Usage Examples
@@ -208,6 +249,12 @@ lyriq --search "Circles Post Malone"
 
 # Search and select result at specific index
 lyriq --search "Circles Post Malone" --search-index 1
+
+# List and download database dumps with interactive UI
+lyriq --dumps
+
+# Download database dump at specific index directly
+lyriq --dumps --dumps-index 1
 ```
 
 ### CLI Features
@@ -311,6 +358,30 @@ Publishes lyrics to the LRCLIB API.
 - **Returns**: `True` if the publish was successful, `False` otherwise
 - **Raises**: `LyriqError` if there is an error publishing the lyrics
 
+#### `get_database_dumps()`
+
+Fetches the list of available database dumps from the LRCLib database dumps API.
+
+- **Returns**: A list of `DatabaseDump` objects if successful, `None` otherwise
+- **Raises**: `LyriqError` if there is an error fetching the database dumps
+
+#### `get_latest_database_dump()`
+
+Gets the latest database dump from the LRCLib database dumps API.
+
+- **Returns**: The latest `DatabaseDump` object if found, `None` otherwise
+
+#### `download_database_dump(dump, download_path=None, progress_callback=None)`
+
+Downloads a database dump file.
+
+- **Parameters**:
+    - `dump`: The `DatabaseDump` object to download
+    - `download_path`: Optional path to save the file. If not provided, saves to cache directory
+    - `progress_callback`: Optional callback function to track download progress. Called with `(bytes_downloaded, total_bytes)`
+- **Returns**: The path to the downloaded file if successful, `None` otherwise
+- **Raises**: `LyriqError` if there is an error downloading the file
+
 ### Lyrics Class
 
 #### Properties
@@ -408,6 +479,31 @@ Read lyrics from a JSON file.
     - `none_char`: Character to use for empty lines
 - **Returns**: A new `Lyrics` instance
 
+### DatabaseDump Class
+
+#### Properties
+
+- `storage_class`: Storage class of the dump file (e.g., "Standard")
+- `uploaded`: Upload datetime as a `datetime` object
+- `checksums`: Dictionary of checksums for the file
+- `http_etag`: HTTP ETag header value
+- `etag`: ETag value
+- `size`: Size of the dump file in bytes
+- `version`: Version identifier of the dump
+- `key`: Key/filename of the dump file
+- `filename`: Extracted filename from the key (property)
+- `download_url`: Full download URL for the dump (property)
+
+#### Methods
+
+##### `from_dict(data)`
+
+Create a `DatabaseDump` instance from a dictionary.
+
+- **Parameters**:
+    - `data`: Raw database dump data dictionary from the API
+- **Returns**: A new `DatabaseDump` instance
+
 ## Examples
 
 See the examples directory for practical usage examples:
@@ -418,6 +514,7 @@ See the examples directory for practical usage examples:
 - `examples/synced_lyrics.py` - Working with synchronized lyrics
 - `examples/format_conversion.py` - Converting between formats
 - `examples/publishing_lyrics.py` - Publishing lyrics to the API
+- `examples/database_dumps.py` - Working with database dumps
 
 ## Development
 
