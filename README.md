@@ -167,7 +167,7 @@ The library comes with a command-line interface for quick access to lyrics with 
 usage: lyriq [-h] [-v] [--id ID] [--duration [DURATION]] [--search [SEARCH]]
              [--search-index SEARCH_INDEX] [--none-char NONE_CHAR] [--no-info]
              [--plain [{plain,lrc,json}]] [--file FILE] [--file-format {plain,lrc,json}]
-             [--load LOAD]
+             [--load LOAD] [--publish]
              [song_name] [artist_name] [album_name]
 
 Fetch and display song lyrics
@@ -195,6 +195,7 @@ options:
   --file-format {plain,lrc,json}
                         Format to save lyrics to
   --load LOAD           Load lyrics from file
+  --publish             Publish lyrics to the database. Requires --load with song_name, artist_name, and album_name
   --dumps               List and download database dumps
   --dumps-index DUMPS_INDEX
                         Select database dump at specified index directly (1-based)
@@ -240,6 +241,9 @@ lyriq "Circles" "Post Malone" --file Circles-Post-Malone.json --file-format lrc
 # Load lyrics from file
 lyriq --load Circles-Post-Malone.json
 lyriq --load Circles-Post-Malone.lrc
+
+# Publish lyrics to the database (requires song_name, artist_name, album_name, and --load)
+lyriq "Song Name" "Artist Name" "Album Name" --load lyrics.lrc --publish --duration 180
 
 # Search for lyrics using song name and artist name fields with interactive UI
 lyriq "Circles" "Post Malone" --search
