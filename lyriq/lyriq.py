@@ -1115,9 +1115,7 @@ def download_database_dump(
     try:
         req = urllib.request.Request(
             dump.download_url,
-            headers={
-                "User-Agent": f"Lyriq v{__version__} ({__url__})"
-            },
+            headers={"User-Agent": f"Lyriq v{__version__} ({__url__})"},
         )
 
         with urllib.request.urlopen(req) as response:

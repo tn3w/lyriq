@@ -167,7 +167,8 @@ The library comes with a command-line interface for quick access to lyrics with 
 usage: lyriq [-h] [-v] [--id ID] [--duration [DURATION]] [--search [SEARCH]]
              [--search-index SEARCH_INDEX] [--none-char NONE_CHAR] [--no-info]
              [--plain [{plain,lrc,json}]] [--file FILE] [--file-format {plain,lrc,json}]
-             [--load LOAD] [--publish]
+             [--load LOAD] [--dumps] [--dumps-index DUMPS_INDEX]
+             [--publish] [--sync [SYNC]] [--audio AUDIO]
              [song_name] [artist_name] [album_name]
 
 Fetch and display song lyrics
@@ -195,10 +196,12 @@ options:
   --file-format {plain,lrc,json}
                         Format to save lyrics to
   --load LOAD           Load lyrics from file
-  --publish             Publish lyrics to the database. Requires --load with song_name, artist_name, and album_name
   --dumps               List and download database dumps
   --dumps-index DUMPS_INDEX
                         Select database dump at specified index directly (1-based)
+  --publish             Publish lyrics to the database. Requires --load with song_name and artist_name
+  --sync [SYNC]         Sync plain lyrics (from --load) to create LRC. Optionally specify output file (default: <input>.lrc)
+  --audio AUDIO         Audio file to play during sync (requires pygame)
 ```
 
 ### Usage Examples
@@ -245,6 +248,15 @@ lyriq --load Circles-Post-Malone.lrc
 # Publish lyrics to the database (requires song_name, artist_name, album_name, and --load)
 lyriq "Song Name" "Artist Name" "Album Name" --load lyrics.lrc --publish --duration 180
 
+# Sync plain lyrics to create LRC file (manual timing)
+lyriq --load lyrics.txt --sync
+
+# Sync lyrics with audio playback (requires pygame)
+lyriq --load lyrics.txt --sync --audio song.mp3
+
+# Sync with custom output file
+lyriq --load lyrics.txt --sync synced.lrc --audio song.mp3
+
 # Search for lyrics using song name and artist name fields with interactive UI
 lyriq "Circles" "Post Malone" --search
 
@@ -275,6 +287,12 @@ lyriq --dumps --dumps-index 1
     - Select with `Enter` or number keys `1-9`
     - Pagination with 4 results per page
     - Shows synchronized lyrics availability with color indicators
+- Lyrics sync tool:
+    - Create LRC files from plain text lyrics
+    - Optional audio playback with pygame (install separately)
+    - Press `SPACE` to mark timestamps for each line
+    - Press `Q` to quit and save progress
+    - Works without audio for manual timing
 
 ## API Reference
 

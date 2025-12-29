@@ -629,6 +629,168 @@ def display_search_results(
                     selected_idx = min(max_idx, selected_idx + 1)
 
 
+def format_lrc_timestamp(seconds: float) -> str:
+    """
+    Format seconds to LRC timestamp format [MM:SS.ms].
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        Formatted LRC timestamp string
+    """
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"[{minutes:02d}:{secs:05.2f}]"
+
+
+def handle_sync_lyrics(
+    lyrics_file: str,
+    audio_file: Optional[str] = None,
+    output_file: Optional[str] = None,
+) -> int:
+    """
+    Handle the lyrics sync CLI functionality.
+
+    Allows users to manually sync plain lyrics by pressing SPACE to mark timestamps.
+    Optionally plays an audio file using pygame if available.
+
+    Args:
+        lyrics_file: Path to the plain lyrics file
+        audio_file: Optional path to an audio file for playback
+        output_file: Optional path for the output LRC file
+
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    if not os.path.exists(lyrics_file):
+        print(f"{Colors.RED}Error: Lyrics file not found: {lyrics_file}{Colors.RESET}")
+        return 1
+
+    with open(lyrics_file, "r", encoding="utf-8") as f:
+        lines = [line.strip() for line in f if line.strip()]
+
+    if not lines:
+        print(f"{Colors.RED}Error: No lyrics found in file.{Colors.RESET}")
+        return 1
+
+    if not output_file:
+        from pathlib import Path
+
+        output_file = str(Path(lyrics_file).stem) + ".lrc"
+
+    use_audio = False
+    pygame_mixer = None
+
+    if audio_file:
+        if not os.path.exists(audio_file):
+            print(
+                f"{Colors.RED}Error: Audio file not found: {audio_file}{Colors.RESET}"
+            )
+            return 1
+
+        try:
+            import pygame
+
+            pygame.mixer.init()
+            pygame.mixer.music.load(audio_file)
+            pygame_mixer = pygame.mixer
+            use_audio = True
+            print(f"{Colors.GREEN}✓ Audio loaded: {audio_file}{Colors.RESET}")
+        except ImportError:
+            print(
+                f"{Colors.YELLOW}Warning: pygame not installed. "
+                f"Syncing without audio playback.{Colors.RESET}"
+            )
+            print(
+                f"{Colors.BRIGHT_BLACK}Install pygame with: pip install pygame{Colors.RESET}\n"
+            )
+        except Exception as e:
+            print(
+                f"{Colors.YELLOW}Warning: Could not load audio file: {e}{Colors.RESET}"
+            )
+            print(
+                f"{Colors.BRIGHT_BLACK}Syncing without audio playback.{Colors.RESET}\n"
+            )
+
+    synced_lyrics = []
+    current_index = 0
+    start_time = None
+
+    print(f"\n{Colors.BOLD}Lyrics Sync Tool{Colors.RESET}")
+    print(f"Lyrics file: {lyrics_file}")
+    print(f"Output file: {output_file}")
+    print(f"Total lines: {len(lines)}")
+    print("-" * 60)
+
+    if use_audio:
+        print(f"\nPress {Colors.YELLOW}ENTER{Colors.RESET} to start audio playback...")
+    else:
+        print(f"\nPress {Colors.YELLOW}ENTER{Colors.RESET} to start timing...")
+
+    get_keypress()
+
+    if use_audio and pygame_mixer:
+        pygame_mixer.music.play()
+
+    start_time = time.time()
+
+    print(
+        f"\nPress {Colors.YELLOW}SPACE{Colors.RESET} to sync current line, "
+        f"{Colors.YELLOW}Q{Colors.RESET} to quit and save\n"
+    )
+    print("-" * 60)
+
+    while current_index < len(lines):
+        current_line = lines[current_index]
+        remaining = len(lines) - current_index
+
+        print(f"\n{Colors.BRIGHT_BLACK}[{remaining} lines left]{Colors.RESET}")
+        print("-" * 40)
+
+        if current_index > 0:
+            print(f"  {Colors.BRIGHT_BLACK}{lines[current_index - 1]}{Colors.RESET}")
+        else:
+            print()
+
+        print(
+            f"{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}>>> {current_line}{Colors.RESET}"
+        )
+
+        for offset in range(1, 3):
+            if current_index + offset < len(lines):
+                print(
+                    f"  {Colors.BRIGHT_BLACK}{lines[current_index + offset]}{Colors.RESET}"
+                )
+
+        print("-" * 40)
+
+        while True:
+            key = get_keypress()
+
+            if key == " ":
+                elapsed = time.time() - start_time
+                timestamp = format_lrc_timestamp(elapsed)
+                synced_lyrics.append(f"{timestamp}{current_line}")
+                print(f"  {Colors.GREEN}✓ Synced at {timestamp}{Colors.RESET}")
+                current_index += 1
+                break
+            elif key.lower() == "q":
+                print(f"\n{Colors.YELLOW}Saving and exiting...{Colors.RESET}")
+                current_index = len(lines)
+                break
+
+    if use_audio and pygame_mixer:
+        pygame_mixer.music.stop()
+        pygame_mixer.quit()
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write("\n".join(synced_lyrics))
+
+    print(f"\n{Colors.GREEN}✓ Saved synced lyrics to: {output_file}{Colors.RESET}")
+    return 0
+
+
 def main() -> int:
     """
     Main function for the CLI tool.
@@ -722,11 +884,32 @@ def main() -> int:
         action="store_true",
         help="Publish lyrics to the database. Requires --load with song_name and artist_name",
     )
+    parser.add_argument(
+        "--sync",
+        nargs="?",
+        const=True,
+        default=None,
+        help="Sync plain lyrics (from --load) to create LRC. Optionally specify output file (default: <input>.lrc)",
+    )
+    parser.add_argument(
+        "--audio",
+        default=None,
+        help="Audio file to play during sync (requires pygame)",
+    )
 
     args = parser.parse_args()
 
     if args.dumps:
         return handle_database_dumps(args.dumps_index)
+
+    if args.sync is not None:
+        if not args.load:
+            print(
+                f"{Colors.RED}Error: --sync requires --load to specify a lyrics file.{Colors.RESET}"
+            )
+            return 1
+        output_file = args.sync if isinstance(args.sync, str) else None
+        return handle_sync_lyrics(args.load, args.audio, output_file)
 
     if args.publish:
         if not args.load:
