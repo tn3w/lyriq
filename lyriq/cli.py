@@ -22,6 +22,7 @@ from . import (
     search_lyrics,
     get_database_dumps,
     download_database_dump,
+    publish_lyrics,
 )
 
 try:
@@ -716,11 +717,75 @@ def main() -> int:
         default=None,
         help="Select database dump at specified index directly (1-based)",
     )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish lyrics to the database. Requires --load with song_name and artist_name",
+    )
 
     args = parser.parse_args()
 
     if args.dumps:
         return handle_database_dumps(args.dumps_index)
+
+    if args.publish:
+        if not args.load:
+            print(
+                f"{Colors.RED}Error: --publish requires --load to specify a lyrics file.{Colors.RESET}"
+            )
+            return 1
+        if not args.song_name or not args.artist_name or not args.album_name:
+            print(
+                f"{Colors.RED}Error: --publish requires song_name, artist_name, and album_name.{Colors.RESET}"
+            )
+            return 1
+
+        if args.load.endswith(".json"):
+            try:
+                lyrics = Lyrics.from_json_file(args.load, args.none_char)
+            except JSONDecodeError:
+                print(
+                    f"{Colors.RED}Error: Invalid JSON file: {args.load}.{Colors.RESET}"
+                )
+                return 1
+        else:
+            lyrics = Lyrics.from_lrc_file(args.load, args.none_char)
+
+        track_name = args.song_name
+        artist_name = args.artist_name
+        album_name = args.album_name
+        duration = args.duration or lyrics.duration or 0
+
+        if duration <= 0:
+            print(
+                f"{Colors.RED}Error: Duration is required. Use --duration or include it in the file.{Colors.RESET}"
+            )
+            return 1
+
+        print(f"{Colors.BOLD}Publishing lyrics...{Colors.RESET}")
+        print(f"Track: {track_name}")
+        print(f"Artist: {artist_name}")
+        print(f"Album: {album_name}")
+        print(f"Duration: {duration}s")
+
+        try:
+            success = publish_lyrics(
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration=duration,
+                plain_lyrics=lyrics.plain_lyrics,
+                synced_lyrics=lyrics.synced_lyrics,
+            )
+            if success:
+                print(f"{Colors.GREEN}✓ Lyrics published successfully!{Colors.RESET}")
+                return 0
+            else:
+                print(f"{Colors.RED}✗ Failed to publish lyrics.{Colors.RESET}")
+                return 1
+        except Exception as e:
+            print(f"{Colors.RED}✗ Error publishing lyrics: {e}{Colors.RESET}")
+            return 1
 
     if args.search is not False:
         search_query = None
